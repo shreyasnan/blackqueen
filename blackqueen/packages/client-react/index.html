@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#2a1a33" />
+  <title>Black Queen</title>
+  <style>
+    :root {
+      --parchment:#f3e9d7; --ink:#3b2247; --ink-soft:#5c4a6b; --gold:#c9992e; --coral:#e0684b;
+      --teal:#2e8f83; --card:#fffdf7; --shadow:rgba(59,34,71,.25);
+    }
+    * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
+    html,body,#root { height:100%; }
+    body { background:var(--parchment); color:var(--ink); font:15px/1.45 Georgia,'Iowan Old Style',serif;
+           overscroll-behavior:none; }
+    button { font:inherit; transition: transform .12s ease, filter .12s ease, box-shadow .12s ease; }
+    button:hover:not(:disabled) { filter: brightness(1.07); }
+    button:active:not(:disabled) { transform: scale(.96); }
+    button:focus-visible, input:focus-visible { outline: 2.5px solid var(--gold); outline-offset: 2px; }
+    input { transition: border-color .12s ease; }
+    ::selection { background: rgba(201,153,46,.35); }
+    @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

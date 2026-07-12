@@ -1,0 +1,26 @@
+name = "blackqueen"
+main = "src/worker.ts"
+compatibility_date = "2025-06-01"
+
+[assets]
+directory = "../client-react/dist"   # UI-M1 React app (old single-file client kept at ../client/dist for rollback)
+binding = "ASSETS"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]
+
+[[kv_namespaces]]
+binding = "CODES"
+id = "1b185d5c0bf34da1b869a18a1a7a61b7"
+
+[[r2_buckets]]
+binding = "AUDIT"
+bucket_name = "blackqueen-audit"
+
+[vars]
+CLERK_JWKS_URL = "https://calm-kid-92.clerk.accounts.dev/.well-known/jwks.json"

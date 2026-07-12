@@ -1,0 +1,55 @@
+name: Test & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: blackqueen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install (workspaces)
+        run: npm ci || npm install
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Engine + server tests (KAT-001, property suites, room core)
+        run: npx vitest run
+      - name: Install client
+        working-directory: blackqueen/packages/client-react
+        run: npm ci || npm install
+      - name: Typecheck client
+        working-directory: blackqueen/packages/client-react
+        run: npx tsc --noEmit
+      - name: Build client
+        working-directory: blackqueen/packages/client-react
+        run: npx vite build
+      - name: Upload client build
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: blackqueen/packages/client-react/dist
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: blackqueen/packages/client-react/dist
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: blackqueen/packages/server

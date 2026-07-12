@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "noEmit": true,
+    "types": ["@cloudflare/workers-types", "vitest/globals"],
+    "paths": {
+      "@blackqueen/engine": ["./packages/engine/src/index.ts"],
+      "@blackqueen/protocol": ["./packages/protocol/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts"],
+  "exclude": ["packages/client-react"]
+}
