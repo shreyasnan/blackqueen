@@ -5,7 +5,7 @@ import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-21-hand-size"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-22-playtest-fixes"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -308,16 +308,30 @@ function Lobby({ auth }: { auth: AuthState }) {
           )}
         </div>
       )}
-      {isHost && (
-        <button style={{ ...btn, opacity: roomInfo.members.length >= 4 ? 1 : 0.4 }} disabled={roomInfo.members.length < 4 || starting}
-          onClick={async () => {
-            setStarting(true);
-            try { await api(`/api/rooms/${roomInfo.roomId}/start`, {}); connect(roomInfo.roomId); }
-            catch (e) { pushToast(String(e)); setStarting(false); }
-          }}>
-          Start game
-        </button>
-      )}
+      {isHost && (() => {
+        // U1: a 2-deck table needs 6–7 players — gate the button and SAY WHY, never fail silently
+        const minPlayers = (roomInfo as any).deckCount === 2 ? 6 : 4;
+        const short = minPlayers - roomInfo.members.length;
+        return (
+          <>
+            <button style={{ ...btn, opacity: short <= 0 ? 1 : 0.4 }} disabled={short > 0 || starting}
+              onClick={async () => {
+                setStarting(true);
+                try { await api(`/api/rooms/${roomInfo.roomId}/start`, {}); connect(roomInfo.roomId); }
+                catch (e) { pushToast(`Couldn't start: ${e instanceof Error ? e.message : e}`); setStarting(false); }
+              }}>
+              Start game
+            </button>
+            {short > 0 && (
+              <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
+                {(roomInfo as any).deckCount === 2
+                  ? <>2-deck games need <b>6–7 players</b> — add {short} more (bots count!)</>
+                  : <>need {short} more player{short > 1 ? "s" : ""} (bots count!)</>}
+              </div>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }

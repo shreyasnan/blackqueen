@@ -5,7 +5,7 @@
 import { Card, Suit, SUITS, cardEq, cardKey, calledCardCount, canonicalDeck, defaultHandSize, minHandSize, maxHandSize } from "./cards.js";
 import { deal } from "./deal.js";
 import { BiddingState, applyBid, applyPass, initBidding } from "./bidding.js";
-import { autoPlayCard, isLegalPlay, legalPlays, trickWinner, trickPoints, TrickPlay } from "./tricks.js";
+import { autoPlayCard, autoPlayCardTeam, isLegalPlay, legalPlays, trickWinner, trickPoints, TrickPlay } from "./tricks.js";
 import { scoreRound, pauseEndDelta, competitionRanks, RoundScore } from "./scoring.js";
 
 export type Phase =
@@ -223,7 +223,10 @@ function finishBidStep(
 }
 
 function chooseTrump(state: GameState, seat: number, suit: Suit): ApplyResult {
-  if (state.phase !== "TRUMP_SELECTION" || !state.round) return reject("WRONG_PHASE");
+  // v2.2 (§9.1 amendment): the staged trump may be REPLACED any time before CALL_CARDS —
+  // staging bumps nothing and emits nothing, so re-staging leaks nothing to the table.
+  // Trump is final only when CALL_CARDS applies the staged value in one versioned transition.
+  if ((state.phase !== "TRUMP_SELECTION" && state.phase !== "CALLING_PARTNERS") || !state.round) return reject("WRONG_PHASE");
   if (seat !== state.round.declarerSeat) return reject("NOT_YOUR_TURN");
   if (!SUITS.includes(suit)) return reject("ILLEGAL");
   // §9.2 staged apply: NO version bump, NO events (declarer's client echoes locally).
@@ -342,10 +345,14 @@ function timeout(state: GameState): ApplyResult {
   switch (state.phase) {
     case "BIDDING": // §8.6 auto-pass — always legal (on-turn is never the high bidder)
       return pass(state, r!.turnSeat!, true);
-    case "TRICK_PLAY": { // §10 auto-play least-valuable legal card
+    case "TRICK_PLAY": { // §10 auto-play: defenders least-valuable; declarer side team-preserving (v2.2)
       const seat = r!.turnSeat!;
       const ledSuit = r!.currentTrick.length === 0 ? null : r!.currentTrick[0]!.card.suit;
-      return playCard(state, seat, autoPlayCard(r!.hands[seat]!, ledSuit), true);
+      const onDeclarerSide = seat === r!.declarerSeat || r!.claimedBy.includes(seat);
+      const card = onDeclarerSide
+        ? autoPlayCardTeam(r!.hands[seat]!, ledSuit, r!.trump!, r!.currentTrick, state.deckCount)
+        : autoPlayCard(r!.hands[seat]!, ledSuit);
+      return playCard(state, seat, card, true);
     }
     case "TRUMP_SELECTION":
     case "CALLING_PARTNERS": // §9.4: never auto-select → PAUSED (event carries no sub-state)

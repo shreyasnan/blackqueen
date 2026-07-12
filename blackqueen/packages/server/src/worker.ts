@@ -121,8 +121,16 @@ export default {
       return new Response("not found", { status: 404 });
     }
 
-    // Static client assets
-    if (env.ASSETS) return env.ASSETS.fetch(req);
+    // Static client assets. index.html must never be cached (it names the hashed bundle —
+    // a stale copy pins users to an old build); the hashed assets themselves are immutable.
+    if (env.ASSETS) {
+      const res = await env.ASSETS.fetch(req);
+      const isHtml = url.pathname === "/" || url.pathname.endsWith(".html");
+      if (!isHtml) return res;
+      const out = new Response(res.body, res);
+      out.headers.set("Cache-Control", "no-cache");
+      return out;
+    }
     return new Response("blackqueen server", { status: 200 });
   },
 } satisfies ExportedHandler<WorkerEnv>;

@@ -49,3 +49,27 @@ export function autoPlayCard(hand: Card[], ledSuit: Suit | null): Card {
     return d < 0 ? c : min;
   });
 }
+
+/** §10 (v2.2) team-preserving auto-play for the DECLARER SIDE (declarer + claimed partners) —
+ *  a timed-out declarer shouldn't donate the contract:
+ *  1. If the trick already holds ≥15 points and a legal card would take it as it stands,
+ *     play the CHEAPEST such card (pointValue↑, rank↑, suit↑).
+ *  2. Otherwise play the lowest 0-point legal card from the hand's LONGEST suit.
+ *  3. If every legal card carries points, fall back to the §10 least-valuable rule.
+ *  Deterministic. Defenders keep the original least-valuable rule (TO-002). */
+export function autoPlayCardTeam(hand: Card[], ledSuit: Suit | null, trump: Suit, trick: TrickPlay[], deckCount = 1): Card {
+  const legal = legalPlays(hand, ledSuit);
+  const cheap = (a: Card, b: Card) =>
+    pointValue(a) - pointValue(b) || rankIndex(a.rank) - rankIndex(b.rank) || suitIndex(a.suit) - suitIndex(b.suit);
+  if (trick.length > 0 && trickPoints(trick) >= 15) {
+    const winners = legal.filter((c) => trickWinner([...trick, { seat: -1, card: c }], trump, deckCount) === -1);
+    if (winners.length > 0) return winners.slice().sort(cheap)[0]!;
+  }
+  const zeros = legal.filter((c) => pointValue(c) === 0);
+  if (zeros.length > 0) {
+    const suitLen = (s: Suit) => hand.filter((c) => c.suit === s).length;
+    return zeros.slice().sort((a, b) =>
+      suitLen(b.suit) - suitLen(a.suit) || rankIndex(a.rank) - rankIndex(b.rank) || suitIndex(a.suit) - suitIndex(b.suit))[0]!;
+  }
+  return autoPlayCard(hand, ledSuit);
+}

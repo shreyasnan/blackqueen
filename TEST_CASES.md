@@ -2,7 +2,7 @@
 
 Regression tests for the game engine. Each test lists a **deterministic setup**, an **exact action sequence**, and **explicit assertions** that MUST hold. A build that fails any REQUIRED test is not spec-compliant.
 
-Spec references: `GAME_SPEC.md` v2.1 (bidding §8; trump/call §9; trick play §10; result §11; scoring §12; state machine §14.1; visibility §14.2). Protocol references: `MESSAGE_PROTOCOL.md` v1.6. Architecture references: `ARCHITECTURE.md` v1.5.
+Spec references: `GAME_SPEC.md` v2.2 (bidding §8; trump/call §9; trick play §10; result §11; scoring §12; state machine §14.1; visibility §14.2). Protocol references: `MESSAGE_PROTOCOL.md` v1.7. Architecture references: `ARCHITECTURE.md` v1.5.
 
 **Card notation:** `<rank><suit>`, suits `♣ ♦ ♥ ♠`, ranks `2..10,J,Q,K,A`. **Canonical order** (deck ordering / dealing, §3.1): suit `♣<♦<♥<♠`, then rank `2<…<A`. **Auto-play order** (timeout, §10) is different: `(pointValue↑, rank↑, suit↑)`. Seats are `0..n−1` clockwise.
 
@@ -282,3 +282,13 @@ Same pipeline as KAT-001 with `deckCount=2`, `playerCount=6`, `defaultDeclarerSe
 - Room level: `startGame` CLAMPS a legal-integer `handSize` to the actual table's range (never rejects); non-integers rejected. Effective value surfaces in the lobby state.
 
 Implemented: `packages/engine/test/deal.test.ts` (CONFIG-005), `packages/server/test/core.test.ts` (clamp cases), property suites drive random legal hand sizes.
+
+## 13. v2.2 — Playtest amendments
+
+### TO-004 — team-preserving auto-play (REQUIRED)
+Declarer side (declarer + claimed partners) on timeout: (a) if the current trick holds ≥15 points and a legal card wins it as it stands, play the cheapest such card; (b) else lowest 0-point legal card of the hand's longest suit; (c) else the §10 least-valuable rule. 2-deck: an identical copy never "wins" a tie (first-played holds), so it must not be chosen as a taker. Defenders keep TO-002 exactly.
+Implemented: `packages/engine/test/tricks-scoring.test.ts` (TO-004 block).
+
+### PHASE-001 (v2.2 case) — trump re-stage (REQUIRED)
+A second `CHOOSE_TRUMP` before `CALL_CARDS` REPLACES the staged trump: no version bump, no events, latest value commits at `CALL_CARDS`; any `CHOOSE_TRUMP` after `CALL_CARDS` is rejected.
+Implemented: `packages/engine/test/round.test.ts`.

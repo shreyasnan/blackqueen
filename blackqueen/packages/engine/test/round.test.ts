@@ -53,11 +53,17 @@ describe("PHASE-001/002 — declarer setup collapse & staged trump (engine level
       expect(v.phase).toBe("DECLARER_SETUP");
     }
   });
-  it("second CHOOSE_TRUMP rejected (trump final once accepted, §9.1)", () => {
+  it("v2.2: staged trump may be REPLACED before CALL_CARDS — silent, latest wins (§9.1 amendment)", () => {
     let s = setupRound();
     s = ok(s, { type: "CHOOSE_TRUMP", seat: 0, suit: "H" }).state;
-    const r = applyAction(s, { type: "CHOOSE_TRUMP", seat: 0, suit: "S" });
-    expect(r.ok).toBe(false);
+    const r = ok(s, { type: "CHOOSE_TRUMP", seat: 0, suit: "S" }); // mis-click fix
+    expect(r.versionBump).toBe(false);
+    expect(r.events).toEqual([]);
+    expect(r.state.round!.stagedTrump).toBe("S");
+    const done = ok(r.state, { type: "CALL_CARDS", seat: 0, cards: [c("QH")] });
+    expect(playerView(done.state, 2).trump).toBe("S"); // the replacement committed
+    // after CALL_CARDS the trump IS final:
+    expect(applyAction(done.state, { type: "CHOOSE_TRUMP", seat: 0, suit: "H" }).ok).toBe(false);
   });
   it("CALL_CARDS: one transition emits TRUMP_CHOSEN then CARDS_CALLED consecutively", () => {
     let s = setupRound();

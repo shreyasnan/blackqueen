@@ -424,6 +424,7 @@ export class RoomCore {
       // connection status is a public table fact (who's "away") + the fast-forward budget for honest rings
       seatConnected: this.accountOfSeat.map((acct) => this.members.find((m) => m.accountId === acct)?.connected ?? false),
       awayBudgetMs: RoomCore.AWAY_BUDGET_MS,
+      setupBudgetMs: this.config.turnTimerMs + this.config.graceMs + RoomCore.SETUP_EXTRA_MS, // v2.2: honest ring during DECLARER_SETUP
     };
     return { t: "ViewUpdate", roomId: this.roomId, stateVersion: this.stateVersion, phase: view.phase, view };
   }
@@ -469,6 +470,7 @@ export class RoomCore {
   }
 
   static AWAY_BUDGET_MS = 12_000; // fast-forward for visibly-disconnected actors (playtest: 45s × every turn = agony)
+  static SETUP_EXTRA_MS = 45_000; // v2.2: extra declarer-setup runway before the table PAUSEs (playtest G3)
 
   /** Is the awaited actor a disconnected human? (Bots are always "connected".) */
   private awaitedActorAway(): boolean {
@@ -487,6 +489,11 @@ export class RoomCore {
     // Away fast-forward (ARCH §6 amendment): a disconnected actor's turns resolve in 12s, not 45s —
     // the table shouldn't crawl because someone closed a tab. Reconnecting restores the full budget.
     if (this.awaitedActorAway()) return Math.min(RoomCore.AWAY_BUDGET_MS, this.config.turnTimerMs + this.config.graceMs);
+    // v2.2 (playtest G3): declarer setup is a bigger decision than a normal turn — trump + a
+    // partner-card grid (52 identities in 2-deck games). Give it extra runway before PAUSED.
+    if (p === "TRUMP_SELECTION" || p === "CALLING_PARTNERS") {
+      return this.config.turnTimerMs + this.config.graceMs + RoomCore.SETUP_EXTRA_MS;
+    }
     return this.config.turnTimerMs + this.config.graceMs; // single combined budget (ARCH §6)
   }
 

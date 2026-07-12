@@ -12,6 +12,7 @@ import { sfx, haptic, isMuted, toggleMute } from "./audio";
 import { Face } from "./faces";
 
 const GLYPH: Record<string, string> = { C: "♣", D: "♦", H: "♥", S: "♠" };
+const SUIT_WORD: Record<string, string> = { C: "Clubs", D: "Diamonds", H: "Hearts", S: "Spades" }; // U5: aria labels
 const SUITS: Suit[] = ["C", "D", "H", "S"];
 const AVATARS = ["🦊", "🦉", "🐱", "🦡", "🐰", "🦝", "🐸"];
 const SEAT_COLORS = ["#e0684b", "#2e8f83", "#c9992e", "#7b5ea7", "#4a7fb5", "#b5527f", "#6b8e3f"];
@@ -71,6 +72,24 @@ export function Table() {
   const wide = useWide();
   useTheater(view, setOverlay, setBubbles, () => setBurst((b) => b + 1));
   const [, force] = useState(0);
+  // Playtest #2 fix: the round verdict is DERIVED FROM STATE, not only from the live event —
+  // reconnect/refresh/late-join during ROUND_END still shows the "BID MADE/FAILED" screen.
+  const dismissedRound = useRef(0);
+  useEffect(() => {
+    const v2 = view;
+    if (!v2) return;
+    const delta = v2.lastRoundDelta;
+    if (v2.phase === "ROUND_END" && delta && dismissedRound.current !== v2.roundNumber) {
+      setOverlay((o) => o ?? ({
+        type: "round",
+        success: v2.lastRoundSuccess ?? false,
+        pts: v2.revealedTeamMembers.reduce((s, seat) => s + (v2.perPlayerCapturedPoints[seat] ?? 0), 0),
+        delta,
+        solo: !(v2.lastRoundSuccess ?? false) && delta.filter((x) => x < 0).length === 1,
+      } as Overlay));
+    }
+    if (v2.phase !== "ROUND_END" && dismissedRound.current !== v2.roundNumber) dismissedRound.current = 0;
+  }, [view]);
   if (!view) return <Center>Connecting…</Center>;
   const isHost = view.hostSeat === view.viewerSeat;
 
@@ -92,14 +111,14 @@ export function Table() {
           {/* ---- THE TABLE: top-down oval, seats around the rim, cards land in front of their player ---- */}
           <PokerTable view={view} bubbles={bubbles} />
           {/* ---- your controls + hand below the rail ---- */}
-          <MyArea view={view} isHost={isHost} />
+          <MyArea view={view} isHost={isHost} hideNext={overlay?.type === "round"} />
           {!wide && <BottomDrawer view={view} />}
         </div>
         {wide && <ActivitySidebar view={view} isHost={isHost} />}
       </div>
       <LastTrickModal view={view} />
       <DeclarerSetupModal view={view} />
-      <SetPiece overlay={overlay} view={view} onDismiss={() => setOverlay(null)} />
+      <SetPiece overlay={overlay} view={view} onDismiss={() => { dismissedRound.current = view.roundNumber; setOverlay(null); }} />
       <Confetti burst={burst} />
       <FlightLayer />
       {connection === "reconnecting" && <Banner>Reconnecting…</Banner>}
@@ -129,13 +148,18 @@ const deadIdentities = (playerCount: number, deckCount: number, handSize?: numbe
 };
 const RANKS_DESC: Card["rank"][] = ["A", "K", "Q", "J", "10", "9", "8", "7", "6", "5", "4", "3", "2"];
 
+/** U6: partner-card picks survive a PAUSE/resume (and a remount) within the same round. */
+const pickCache = new Map<number, Card[]>();
+
 function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
   const stagedLocal = useStore((s) => s.stagedTrump);
   const stageTrump = useStore((s) => s.stageTrump);
   const stagedTrump = stagedLocal ?? v.stagedTrumpOwn ?? null;
-  const [picked, setPicked] = useState<Card[]>([]);
+  const [picked, setPickedRaw] = useState<Card[]>(() => pickCache.get(v.roundNumber) ?? []);
+  const setPicked = (fn: (ps: Card[]) => Card[]) =>
+    setPickedRaw((ps) => { const next = fn(ps); pickCache.set(v.roundNumber, next); return next; });
   const open = v.phase === "DECLARER_SETUP" && v.declarerSeat === v.viewerSeat;
-  useEffect(() => { if (!open) setPicked([]); }, [open]);
+  useEffect(() => { if (open) setPickedRaw(pickCache.get(v.roundNumber) ?? []); }, [open, v.roundNumber]);
   if (!open) return null;
 
   const C = v.calledCount ?? (v.playerCount <= 5 ? 1 : 2);
@@ -159,7 +183,7 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
         <div style={{ fontSize: 34, fontWeight: 800, color: "var(--gold)", lineHeight: 1.1 }}>{v.Y}</div>
         <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>your team must capture {v.Y} of {v.totalPoints ?? 150} points</div>
 
-        {/* step 1: trump */}
+        {/* step 1: trump — v2.2: switchable until you call (mis-click insurance, §9.1 amendment) */}
         <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, color: "var(--ink-soft)", margin: "6px 0 4px" }}>
           {stagedTrump ? "TRUMP" : "CHOOSE THE TRUMP"}
         </div>
@@ -167,19 +191,25 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
           {SUITS.map((s) => {
             const chosen = stagedTrump === s;
             return (
-              <motion.button key={s} whileTap={{ scale: 0.88 }} disabled={!!stagedTrump && !chosen}
-                onClick={() => { if (!stagedTrump) { stageTrump(s); sendAction("CHOOSE_TRUMP", { suit: s }); } }}
+              <motion.button key={s} whileTap={{ scale: 0.88 }}
+                onClick={() => { if (!chosen) { stageTrump(s); sendAction("CHOOSE_TRUMP", { suit: s }); sfx.lift(); } }}
                 style={{
                   ...btnSec, fontSize: 24, padding: "8px 15px", borderRadius: 10,
                   color: red(s) ? "#ff9b8a" : "var(--parchment)",
                   background: chosen ? "var(--gold)" : "var(--ink)",
-                  opacity: stagedTrump && !chosen ? 0.28 : 1,
+                  opacity: stagedTrump && !chosen ? 0.55 : 1, cursor: "pointer",
                 }}>
                 {GLYPH[s]}
               </motion.button>
             );
           })}
         </Row>
+        {stagedTrump && (
+          <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 3 }}>
+            changed your mind? tap another suit — trump locks when you call
+          </div>
+        )}
+        <SetupCountdown view={v} />
 
         {/* step 2: partner card(s) — tap to select from the full deck grid */}
         <div style={{ opacity: stagedTrump ? 1 : 0.35, pointerEvents: stagedTrump ? "auto" : "none", transition: "opacity .25s" }}>
@@ -234,12 +264,31 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
           <div style={{ minHeight: 18, fontSize: 12, fontWeight: 700, color: "var(--coral)" }}>
             {picked.some(inHand) && <>calling your own card — that's a SOLO play</>}
           </div>
-          <button disabled={picked.length !== C} onClick={() => { sendAction("CALL_CARDS", { cards: picked }); sfx.thock(); }}
+          <button disabled={picked.length !== C} onClick={() => { sendAction("CALL_CARDS", { cards: picked }); pickCache.delete(v.roundNumber); sfx.thock(); }}
             style={{ ...btn, padding: "11px 26px", fontSize: 15, opacity: picked.length === C ? 1 : 0.4, marginTop: 2 }}>
             {picked.length === C ? `Call ${picked.map(ck).join(" + ")} ▸` : `pick ${C - picked.length} more`}
           </button>
         </div>
       </motion.div>
+    </motion.div>
+  );
+}
+
+/** G3: honest countdown inside the setup modal — the table pauses when it hits zero. */
+function SetupCountdown({ view: v }: { view: ExtendedView }) {
+  const budget = (v as any).setupBudgetMs ?? ((v.turnBudgetMs ?? 45000) + 45000);
+  const [left, setLeft] = useState(budget);
+  useEffect(() => {
+    const started = Date.now();
+    const t = setInterval(() => setLeft(Math.max(0, budget - (Date.now() - started))), 1000);
+    return () => clearInterval(t);
+  }, [budget]);
+  const s = Math.ceil(left / 1000);
+  if (s > 20) return null; // silence until it matters
+  return (
+    <motion.div animate={{ scale: s <= 8 ? [1, 1.06, 1] : 1 }} transition={s <= 8 ? { repeat: Infinity, duration: 0.9 } : undefined}
+      style={{ marginTop: 6, fontSize: 12.5, fontWeight: 800, color: s <= 8 ? "var(--coral)" : "var(--ink-soft)" }}>
+      ⏳ choose in {s}s or the table pauses
     </motion.div>
   );
 }
@@ -362,41 +411,48 @@ const firstName = (v: ExtendedView, s: number) => nameOf(v, s).split(" ")[0]!;
 const faceOf = (v: ExtendedView, s: number): string => v.seatAvatars?.[s] ?? AVATARS[s % AVATARS.length]!;
 
 /* ------------------------------ seats ------------------------------ */
-function TimerRing({ active, budgetMs, size }: { active: boolean; budgetMs: number; size: number }) {
+function TimerRing({ active, budgetMs, size, self }: { active: boolean; budgetMs: number; size: number; self?: boolean }) {
   const stateVersion = useStore((s) => s.stateVersion);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const ticked = useRef<number>(99);
   useEffect(() => { // countdown digits for the final stretch — the ring alone is easy to miss
-    if (!active) { setSecondsLeft(null); return; }
+    if (!active) { setSecondsLeft(null); ticked.current = 99; return; }
     const started = Date.now();
     const t = setInterval(() => {
       const left = Math.ceil((budgetMs - (Date.now() - started)) / 1000);
-      setSecondsLeft(left <= 12 ? Math.max(0, left) : null);
-    }, 500);
+      setSecondsLeft(left <= 15 ? Math.max(0, left) : null);
+      // G2: audible last-3-seconds ticks for YOUR OWN turn only (one per second)
+      if (self && left <= 3 && left >= 1 && left < ticked.current) { ticked.current = left; sfx.lift(); haptic(20); }
+    }, 250);
     return () => clearInterval(t);
-  }, [active, budgetMs, stateVersion]);
+  }, [active, budgetMs, stateVersion, self]);
   if (!active) return null;
   const r = size / 2 - 2;
   const c = 2 * Math.PI * r;
+  const urgent = secondsLeft !== null && secondsLeft <= 5;
   return (
     <>
       {!REDUCED && (
         <svg key={stateVersion} width={size} height={size} style={{ position: "absolute", top: -4, left: "50%", marginLeft: -size / 2, transform: "rotate(-90deg)", pointerEvents: "none" }}>
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(59,34,71,.12)" strokeWidth={3} />
-          <motion.circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={3} strokeLinecap="round"
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(59,34,71,.14)" strokeWidth={4} />
+          <motion.circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={4} strokeLinecap="round"
             initial={{ strokeDashoffset: 0, stroke: "#c9992e" }}
-            animate={{ strokeDashoffset: -c, stroke: ["#c9992e", "#c9992e", "#e0684b"] }}
-            transition={{ duration: budgetMs / 1000, ease: "linear", times: [0, 0.75, 1] }}
+            animate={{ strokeDashoffset: -c, stroke: ["#c9992e", "#d9a418", "#e0684b"] }}
+            transition={{ duration: budgetMs / 1000, ease: "linear", times: [0, 0.72, 1] }}
             strokeDasharray={c} />
         </svg>
       )}
       {secondsLeft !== null && (
-        <span style={{
-          position: "absolute", top: -10, right: -16, background: "var(--coral)", color: "#fff",
-          fontSize: 11, fontWeight: 900, borderRadius: 9, minWidth: 18, padding: "1px 3px", textAlign: "center",
-          boxShadow: "0 2px 5px rgba(0,0,0,.3)",
-        }}>
+        <motion.span
+          animate={urgent && !REDUCED ? { scale: [1, 1.25, 1] } : { scale: 1 }}
+          transition={urgent ? { repeat: Infinity, duration: 0.8 } : undefined}
+          style={{
+            position: "absolute", top: -10, right: -16, background: urgent ? "#c62f12" : "var(--coral)", color: "#fff",
+            fontSize: urgent ? 12.5 : 11, fontWeight: 900, borderRadius: 9, minWidth: 18, padding: "1px 3px", textAlign: "center",
+            boxShadow: urgent ? "0 0 10px rgba(224,104,75,.8)" : "0 2px 5px rgba(0,0,0,.3)",
+          }}>
           {secondsLeft}
-        </span>
+        </motion.span>
       )}
     </>
   );
@@ -413,7 +469,18 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
   // THE TEAM MOMENT (playtest #4): once every partner is revealed, plates settle into team colors —
   // warm gold for the declarer's side, cool teal for defenders — cascading seat by seat.
   const teamsKnown = v.allPartnersRevealed;
-  const side: "team" | "def" | null = teamsKnown ? (team ? "team" : "def") : null;
+  // v2.2 (2+ partners): a seat turns GOLD the moment IT is revealed — the first partner's flip
+  // doesn't wait for the second. Defenders only settle to teal once every partner is known
+  // (until then, an uncolored seat might still be the hidden partner).
+  const side: "team" | "def" | null = team ? "team" : teamsKnown ? "def" : null;
+  // one-shot flash when THIS seat joins the declarer side mid-round
+  const wasTeam = useRef(team);
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    const was = wasTeam.current;
+    wasTeam.current = team;
+    if (team && !was) { setFlash(true); const t = setTimeout(() => setFlash(false), 1600); return () => clearTimeout(t); }
+  }, [team]);
   const relation =
     seat === me ? (team && seat !== v.declarerSeat ? "partner (you)" : seat === v.declarerSeat ? "declarer (you)" : side === "def" ? "defender (you)" : null) :
     team && seat !== v.declarerSeat ? (iAmTeam ? "your partner" : "partner") :
@@ -434,14 +501,17 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
         borderColor: active ? "#c9992e" : side === "team" ? "#c9992e" : side === "def" ? "#2e8f83" : team ? SEAT_COLORS[seat % 7]! : "rgba(59,34,71,.14)",
         boxShadow: active
           ? ["0 0 14px rgba(201,153,46,.5), 0 2px 6px rgba(59,34,71,.25)", "0 0 30px rgba(201,153,46,.95), 0 2px 6px rgba(59,34,71,.25)", "0 0 14px rgba(201,153,46,.5), 0 2px 6px rgba(59,34,71,.25)"]
-          : "0 2px 5px rgba(59,34,71,.25)",
+          : side === "team" // declarer's side stays visibly lit even off-turn — you always know who's with whom
+            ? "0 0 12px rgba(201,153,46,.55), 0 2px 5px rgba(59,34,71,.25)"
+            : "0 2px 5px rgba(59,34,71,.25)",
       }}
       transition={{
         ...SPRING,
         boxShadow: active ? { repeat: Infinity, duration: 1.6, ease: "easeInOut" } : undefined,
         // the cascade: each seat flips to its team color a beat after the last (a moment, not a repaint)
-        background: teamsKnown ? { delay: 0.35 + seat * 0.16, duration: 0.6 } : { duration: 0.3 },
-        borderColor: teamsKnown ? { delay: 0.35 + seat * 0.16, duration: 0.6 } : { duration: 0.3 },
+        // team seats flip IMMEDIATELY on their own reveal; the defender cascade still waits for teamsKnown
+        background: side === "team" ? { duration: 0.35 } : teamsKnown ? { delay: 0.35 + seat * 0.16, duration: 0.6 } : { duration: 0.3 },
+        borderColor: side === "team" ? { duration: 0.35 } : teamsKnown ? { delay: 0.35 + seat * 0.16, duration: 0.6 } : { duration: 0.3 },
       }}
       style={{
         position: "relative", textAlign: "center", minWidth: big ? 112 : 84,
@@ -481,7 +551,10 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
       </AnimatePresence>
       <div style={{ position: "relative", display: "inline-block" }}>
         <Face id={faceOf(v, seat)} size={avSize + 8} tint={SEAT_COLORS[seat % 7]} />
-        <TimerRing active={active} budgetMs={away ? (v.awayBudgetMs ?? 12000) : (v.turnBudgetMs ?? 45000)} size={avSize + 18} />
+        <TimerRing active={active} self={active && seat === me}
+          budgetMs={away ? (v.awayBudgetMs ?? 12000)
+            : v.phase === "DECLARER_SETUP" ? ((v as any).setupBudgetMs ?? (v.turnBudgetMs ?? 45000) + 45000)
+            : (v.turnBudgetMs ?? 45000)} size={avSize + 18} />
         {seat === v.declarerSeat && ( // the "declarer button" — poker's dealer-chip language
           <motion.span initial={{ scale: 0, rotate: -120 }} animate={{ scale: 1, rotate: 0 }} transition={SPRING}
             style={{
@@ -497,7 +570,7 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
         {seat === me ? "You" : firstName(v, seat)}
       </div>
       <div style={{ fontSize: 11, color: "var(--ink-soft)", whiteSpace: "nowrap" }}>
-        {away ? <b style={{ color: "var(--coral)" }}>💤 away</b> : <>{v.handCounts[seat]} cards</>} · <b style={{ color: (v.perPlayerCapturedPoints[seat] ?? 0) > 0 ? "var(--ink)" : "var(--ink-soft)" }}>{v.perPlayerCapturedPoints[seat]} pts</b>
+        {away ? <b style={{ color: "var(--coral)" }}>💤 away</b> : <>{v.handCounts[seat]} card{v.handCounts[seat] === 1 ? "" : "s"}</>} · <b style={{ color: (v.perPlayerCapturedPoints[seat] ?? 0) > 0 ? "var(--ink)" : "var(--ink-soft)" }}>{v.perPlayerCapturedPoints[seat]} pts</b>
       </div>
       {relation && (
         <div style={{ fontSize: 10.5, fontWeight: 800, color: side === "def" ? "#2e8f83" : "var(--coral)", letterSpacing: 0.3, textTransform: "uppercase" }}>
@@ -643,14 +716,16 @@ function TrickOnFelt({ view: v }: { view: ExtendedView }) {
       )}
       {shown.length === 0 && (
         <span style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%,-50%)", color: "rgba(255,253,247,.75)", fontStyle: "italic", fontSize: 14, whiteSpace: "nowrap" }}>
-          {v.phase === "TRICK_PLAY" ? (v.turnSeat === me ? "your lead — drag a card up" : "") : last ? "tap to review the last hand" : ""}
+          {v.phase === "TRICK_PLAY" ? (v.turnSeat === me ? "your lead — drag up or double-tap a card" : "") : last ? "tap to review the last hand" : ""}
         </span>
       )}
       <AnimatePresence>
         {shown.map((p) => {
           const winner = linger && p.seat === linger.winnerSeat;
           // the card lands in front of its player: position IS attribution (broadcast-style)
-          const pos = seatPct(rel(p.seat), n, 26, 24);
+          // U4: the bottom seat's plate sits higher (hand fan below) — pull MY landed card
+          // further up-table so it never covers my seat plate / captured-points count.
+          const pos = seatPct(rel(p.seat), n, 26, rel(p.seat) === 0 ? 17 : 24);
           const a = seatAngle(rel(p.seat), n);
           const tilt = (Math.cos(a) * -10).toFixed(1); // slight face-the-center tilt
           const from = seatPct(rel(p.seat), n, 44, 46);
@@ -676,17 +751,18 @@ function TrickOnFelt({ view: v }: { view: ExtendedView }) {
 }
 
 /* ------------------------------ my area (controls + hand; my seat plate lives on the rim) ------------------------------ */
-function MyArea({ view: v, isHost }: { view: ExtendedView; isHost: boolean }) {
+function MyArea({ view: v, isHost, hideNext }: { view: ExtendedView; isHost: boolean; hideNext?: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-      <Controls view={v} isHost={isHost} />
+      <Controls view={v} isHost={isHost} hideNext={hideNext} />
       <Hand view={v} />
     </div>
   );
 }
 
-function Controls({ view: v, isHost }: { view: ExtendedView; isHost: boolean }) {
+function Controls({ view: v, isHost, hideNext }: { view: ExtendedView; isHost: boolean; hideNext?: boolean }) {
   const me = v.viewerSeat;
+  if (hideNext && v.phase === "ROUND_END") return null; // U7: the verdict modal already offers "Play round N"
   if (v.phase === "BIDDING" && v.turnSeat === me) return <BidBox view={v} />;
   // DECLARER_SETUP: handled by the unified DeclarerSetupModal (win-the-bid + trump + partner picker)
   if (v.phase === "PAUSED" && isHost) return (
@@ -775,17 +851,27 @@ function Hand({ view: v }: { view: ExtendedView }) {
   // Bigger cards, responsive: generous on desktop, still 13-cards-wide safe on a 380px phone.
   const cardW = wide ? 78 : Math.min(68, Math.max(56, Math.floor((typeof innerWidth !== "undefined" ? innerWidth : 400) / (n * 0.62 + 1))));
   const overlap = -Math.round(cardW * 0.37);
+  // v2.2 mobile fix: with 12+ cards (2-deck hands) the centered fan clips its left edge off-screen.
+  // When the fan is wider than the viewport, left-align it and let it scroll horizontally.
+  const fanWidth = cardW + (n - 1) * (cardW + overlap);
+  const vw = typeof innerWidth !== "undefined" ? innerWidth : 400;
+  const overflows = !wide && fanWidth > vw - 16;
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
       {n > 0 && ( // own row, never over a card (playtest #1: it hid the first card on mobile)
-        <div style={{ alignSelf: "flex-end", paddingRight: 6 }}>
+        <div style={{ alignSelf: "flex-end", paddingRight: 6, display: "flex", gap: 6, alignItems: "center" }}>
+          {overflows && <span style={{ fontSize: 10, color: "var(--ink-soft)" }}>⟷ swipe the fan</span>}
           <button onClick={() => { setSortBy((x) => (x === "suit" ? "rank" : "suit")); sfx.lift(); }}
             style={{ ...btnSec, padding: "2px 8px", fontSize: 10.5, opacity: 0.75 }}>
             sort: {sortBy}
           </button>
         </div>
       )}
-    <div style={{ position: "relative", display: "flex", justifyContent: "center", alignItems: "flex-end", padding: "2px 0 2px", minHeight: cardW * 1.42 + 20, width: "100%" }}>
+    <div style={{
+      position: "relative", display: "flex", justifyContent: overflows ? "flex-start" : "center", alignItems: "flex-end",
+      padding: overflows ? "2px 8px 2px" : "2px 0 2px", minHeight: cardW * 1.42 + 20, width: "100%",
+      overflowX: overflows ? "auto" : "visible", WebkitOverflowScrolling: "touch" as any,
+    }}>
       {(() => { const seen = new Map<string, number>(); return hand.map((c, i) => {
         const mid = (n - 1) / 2;
         const rot = n > 1 ? (i - mid) * Math.min(2.6, 26 / n) : 0; // gentler rotation: hit boxes ≈ visuals
@@ -794,7 +880,7 @@ function Hand({ view: v }: { view: ExtendedView }) {
         const copy = seen.get(base) ?? 0; // 2-deck: two identical cards need distinct React keys
         seen.set(base, copy + 1);
         return (
-          <div key={`${base}-${copy}`} style={{ marginLeft: i === 0 ? 0 : overlap, transform: `rotate(${rot}deg) translateY(${lift}px)`, zIndex: i }}>
+          <div key={`${base}-${copy}`} style={{ marginLeft: i === 0 ? 0 : overlap, transform: `rotate(${rot}deg) translateY(${lift}px)`, zIndex: i, flexShrink: 0 }}>
             <DraggableCard card={c} width={cardW} playable={myTurn && legal.has(`${c.rank}${c.suit}`)}
               dimmed={myTurn && !legal.has(`${c.rank}${c.suit}`)} focused={myTurn && i === focus} />
           </div>
@@ -822,8 +908,10 @@ function DraggableCard({ card, playable, dimmed, focused, width }: { card: Card;
       onClick={() => {
         if (!playable) return;
         if (armed) { sendAction("PLAY_CARD", { card }); sfx.thock(); haptic(10); }
-        else { setArmed(true); sfx.lift(); setTimeout(() => setArmed(false), 2200); }
+        else { setArmed(true); sfx.lift(); setTimeout(() => setArmed(false), 4000); } // U2: 4s to confirm (was 2.2)
       }}
+      role="button" aria-label={`${playable ? "Play" : ""} ${card.rank} of ${SUIT_WORD[card.suit]}${dimmed ? " (not legal now)" : ""}`}
+      aria-disabled={dimmed || undefined}
       animate={{ y: armed ? -24 : focused ? -14 : playable ? -8 : 0, scale: armed ? 1.08 : 1, zIndex: armed ? 55 : undefined }}
       style={{
         position: "relative", cursor: playable ? "grab" : "default", touchAction: "none",
@@ -833,9 +921,13 @@ function DraggableCard({ card, playable, dimmed, focused, width }: { card: Card;
       }}>
       {armed && ( // unmistakable confirmation of WHICH card is armed (misplay protection)
         <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-          style={{ position: "absolute", top: -26, left: "50%", transform: "translateX(-50%)", background: "var(--ink)", color: "var(--parchment)", borderRadius: 8, padding: "2px 8px", fontSize: 12, fontWeight: 800, whiteSpace: "nowrap", zIndex: 56 }}>
-          play {ck(card)}?
+          style={{ position: "absolute", top: -28, left: "50%", transform: "translateX(-50%)", background: "var(--gold)", color: "#fff", borderRadius: 8, padding: "3px 9px", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap", zIndex: 56, boxShadow: "0 3px 8px rgba(0,0,0,.35)" }}>
+          tap again to play {ck(card)} ▲
         </motion.div>
+      )}
+      {armed && ( // U2: the card rose 24px away from the finger — keep the ORIGINAL touch spot hot
+        <div onClick={(e) => { e.stopPropagation(); sendAction("PLAY_CARD", { card }); sfx.thock(); haptic(10); }}
+          style={{ position: "absolute", left: -6, right: -6, bottom: -30, height: 34, zIndex: 54 }} />
       )}
       <CardFace card={card} highlight={armed || focused} single width={width} />
     </motion.div>
@@ -916,7 +1008,11 @@ function ActivitySidebar({ view: v, isHost }: { view: ExtendedView; isHost: bool
         const mine = v.declarerSeat === me;
         return {
           title: mine ? "Set up your bid" : <><Face id={faceOf(v, v.declarerSeat!)} size={18} /> {firstName(v, v.declarerSeat!)} is scheming</>,
-          detail: mine ? <>Pick trump, then call a card — whoever holds it becomes your secret partner.</> : <>They're choosing trump and calling a partner card. Both revealed together.</>,
+          detail: mine
+            ? (v.deckCount ?? 1) === 2
+              ? <>Pick trump, then call {v.calledCount ?? 2} card{(v.calledCount ?? 2) > 1 ? "s" : ""} — <b>whoever plays the first copy</b> joins your team.</>
+              : <>Pick trump, then call a card — whoever holds it becomes your secret partner.</>
+            : <>They're choosing trump and calling partner card{(v.calledCount ?? 1) > 1 ? "s" : ""}. Both revealed together.</>,
         };
       }
       case "TRICK_PLAY": {
@@ -1139,6 +1235,8 @@ function useTheater(view: ExtendedView | null, setOverlay: (o: Overlay) => void,
             sfx.ret();
             const v2 = useStore.getState().view;
             if (v2 && d.seat !== v2.viewerSeat) useStore.getState().pushToast(`💤 ${firstName(v2, d.seat)} dozed — the table played for them`);
+            // G1: when it happens to YOU, say so loudly — otherwise auto-plays feel like ghosts
+            if (v2 && d.seat === v2.viewerSeat) { useStore.getState().pushToast(`⏰ Time ran out — the table played ${ck(d.card)} for you`); haptic([60, 40, 60]); }
           }
           if (isQS(d.card)) sfx.queen();
           break;

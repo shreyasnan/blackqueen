@@ -26,7 +26,7 @@ npx wrangler dev
 
 ## Current UI build ritual
 
-The client shows a `BUILD_TAG` (bottom of the tagline on Home) — bump it in `packages/client-react/src/App.tsx` with every UI change, rebuild, deploy, hard-refresh, and confirm the tag. Latest: **`ui-21-hand-size`** (v2.1 creator-selectable hand size + v2.0 two-deck mode: 300 pts, claim-model partners, first-played tie rule) (bust avatars, turn pointer + countdown, activity sidebar, guest play, explicit rounds). A prebuilt `dist/` may already be present (built in Claude's sandbox) — in that case `npx wrangler deploy` alone ships it.
+The client shows a `BUILD_TAG` (bottom of the tagline on Home) — bump it in `packages/client-react/src/App.tsx` with every UI change, rebuild, deploy, hard-refresh, and confirm the tag. Latest: **`ui-22-playtest-fixes`** (v2.2: switchable trump, team-aware auto-play, countdown rings, persistent round verdict, mobile 12+ card fan, lobby gating) — previously ui-21-hand-size (v2.1 creator-selectable hand size + v2.0 two-deck mode: 300 pts, claim-model partners, first-played tie rule) (bust avatars, turn pointer + countdown, activity sidebar, guest play, explicit rounds). A prebuilt `dist/` may already be present (built in Claude's sandbox) — in that case `npx wrangler deploy` alone ships it.
 
 One-time secret for guest play: `npx wrangler secret put GUEST_SECRET` (any long random string).
 

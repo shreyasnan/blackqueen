@@ -1,6 +1,6 @@
 // TEST_CASES.md §2 (TRICK-001…004), §4 (SCORE-*), TO-002, RANK-001
 import { describe, expect, it } from "vitest";
-import { legalPlays, isLegalPlay, trickWinner, trickPoints, autoPlayCard, scoreRound, pauseEndDelta, competitionRanks, Card, cardKey } from "../src/index.js";
+import { legalPlays, isLegalPlay, trickWinner, trickPoints, autoPlayCard, autoPlayCardTeam, scoreRound, pauseEndDelta, competitionRanks, Card, cardKey } from "../src/index.js";
 
 const c = (s: string): Card => {
   const suit = s.slice(-1) as Card["suit"];
@@ -149,5 +149,29 @@ describe("TIE-001 — first-played copy wins (2-deck, TEST_CASES §11)", () => {
     ];
     expect(() => trickWinner(plays, "S", 2)).toThrow();
     expect(() => trickWinner(plays.slice(0, 2), "S", 1)).toThrow(); // 2 copies in a 1-deck game
+  });
+});
+
+describe("TO-004 — v2.2 team-preserving auto-play (declarer side)", () => {
+  it("takes a fat trick cheaply: trick holds 30, K wins over led A? no — cheapest WINNING card", () => {
+    // Hearts led, trick: 5H + AH + 10H = 30 pts. Hand holds KH (loses to AH) and 2S (trump).
+    const trick = [
+      { seat: 0, card: c("5H") }, { seat: 1, card: c("AH") }, { seat: 2, card: c("10H") },
+    ];
+    // must follow hearts: KH cannot beat AH -> falls through to longest-suit dump
+    expect(cardKey(autoPlayCardTeam(cs("KH", "3H", "2C"), "H", "S", trick))).toBe("3H");
+    // void in hearts: 2S trumps and takes the 30
+    expect(cardKey(autoPlayCardTeam(cs("2S", "9S", "4C"), "H", "S", trick))).toBe("2S");
+  });
+  it("no fat trick: dumps lowest 0-point card of the LONGEST suit (keeps short-suit exits)", () => {
+    expect(cardKey(autoPlayCardTeam(cs("2D", "3C", "4C", "6C", "KH"), null, "S", []))).toBe("3C");
+  });
+  it("all-points hand falls back to least-valuable rule", () => {
+    expect(cardKey(autoPlayCardTeam(cs("5D", "10C", "AS"), null, "S", []))).toBe("5D");
+  });
+  it("2-deck tie: identical copy does NOT displace the first-played copy", () => {
+    const trick = [{ seat: 0, card: c("AH") }, { seat: 1, card: c("5H") }, { seat: 2, card: c("10H") }];
+    // Holding the other AH: playing it cannot win (first copy holds) -> dump path
+    expect(cardKey(autoPlayCardTeam(cs("AH", "3H", "2H"), "H", "S", trick, 2))).toBe("2H");
   });
 });
