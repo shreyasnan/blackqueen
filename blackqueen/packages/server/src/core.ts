@@ -118,7 +118,9 @@ export class RoomCore {
   }
 
   // ---------- practice bots ----------
-  private static BOT_NAMES = ["Botrick 🤖", "Robotta 🤖", "Beep 🤖", "Chip 🤖", "Servo 🤖", "Gizmo 🤖"];
+  // Names only — no emoji baked in (it doubled up with avatar faces in score lists);
+  // clients render their own bot marker from the isBot flag where it helps (lobby).
+  private static BOT_NAMES = ["Botrick", "Robotta", "Beep", "Chip", "Servo", "Gizmo"];
 
   addBot(byAccountId: string): { ok: boolean; error?: string } {
     if (this.phase !== "OPEN" || byAccountId !== this.hostAccountId) return { ok: false, error: "not host / not open" };

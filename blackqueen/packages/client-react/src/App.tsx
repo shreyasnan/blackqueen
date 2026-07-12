@@ -5,7 +5,7 @@ import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-23-mobile-polish"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-24-mobile-round2"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -156,8 +156,13 @@ function Home({ auth }: { auth: AuthState }) {
           </button>
           <input value={nick} onChange={(e) => setNick(e.target.value)} maxLength={20} placeholder="table nickname"
             autoFocus={nick === "Guest"} onFocus={(e) => nick === "Guest" && e.target.select()}
-            style={{ ...inp, flex: 1, fontWeight: 700 }} />
+            style={{ ...inp, flex: 1, fontWeight: 700, border: /^guest$/i.test(nick.trim()) ? "2px solid var(--coral)" : (inp as any).border }} />
         </div>
+        {/^guest$/i.test(nick.trim()) && (
+          <div style={{ fontSize: 11.5, color: "var(--coral)", fontWeight: 700, marginTop: 5 }}>
+            pick a nickname so friends recognize you at the table
+          </div>
+        )}
         {pickerOpen && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6, marginTop: 10 }}>
             {FACE_IDS.map((f) => (
@@ -286,7 +291,7 @@ function Lobby({ auth }: { auth: AuthState }) {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
         {roomInfo.members.map((m) => (
           <span key={m.accountId} style={{ background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 16, padding: "6px 12px" }}>
-            {(m as any).avatar && <><Face id={(m as any).avatar} size={20} />{" "}</>}{m.displayName}{m.accountId === roomInfo.host ? " ♛" : ""}
+            {(m as any).avatar && <><Face id={(m as any).avatar} size={20} />{" "}</>}{m.displayName}{(m as any).isBot ? " 🤖" : ""}{m.accountId === roomInfo.host ? " ♛" : ""}
           </span>
         ))}
       </div>

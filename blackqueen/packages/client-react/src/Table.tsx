@@ -488,6 +488,7 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
     seat === v.declarerSeat ? (iAmTeam && me !== v.declarerSeat ? "your declarer" : "declarer") :
     side === "def" ? "defender" : null;
   const away = v.seatConnected?.[seat] === false;
+  const wideChip = useWide();
   const avSize = big ? 34 : 27; // compact plates: cards are the stars, squares stay supporting cast
 
   return (
@@ -515,7 +516,8 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
         borderColor: side === "team" ? { duration: 0.35 } : teamsKnown ? { delay: 0.35 + seat * 0.16, duration: 0.6 } : { duration: 0.3 },
       }}
       style={{
-        position: "relative", textAlign: "center", minWidth: big ? 112 : 84,
+        position: "relative", textAlign: "center", minWidth: big ? 112 : wideChip ? 84 : 74,
+        maxWidth: wideChip ? undefined : "44vw", // phones: a side plate must never run off the screen
         borderRadius: 12, padding: big ? "6px 10px 5px" : "4px 7px 4px",
         borderWidth: 2.5, borderStyle: "solid",
       }}>
@@ -546,7 +548,7 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
             animate={{ opacity: 1, y: [0, -7, 0] }}
             transition={{ y: { repeat: Infinity, duration: 0.9, ease: "easeInOut" } }}
             style={{
-              position: "absolute", top: -30, left: "50%", marginLeft: -11, zIndex: 9,
+              position: "absolute", top: -22, left: "50%", marginLeft: -11, zIndex: 9, // hugs the plate (was floating detached on mobile)
               width: 0, height: 0, borderLeft: "11px solid transparent", borderRight: "11px solid transparent",
               borderTop: "14px solid var(--gold)", filter: "drop-shadow(0 2px 4px rgba(0,0,0,.35))",
             }} />
@@ -556,8 +558,8 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
         <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING}
           style={{
             position: "absolute", top: -13, left: "50%", transform: "translateX(-50%)", zIndex: 10, whiteSpace: "nowrap",
-            background: "var(--coral)", color: "#fff", fontSize: 10.5, fontWeight: 900, letterSpacing: 1,
-            borderRadius: 8, padding: "2px 8px", boxShadow: "0 2px 6px rgba(0,0,0,.3)",
+            background: "var(--coral)", color: "#fff", fontSize: wideChip ? 10.5 : 9, fontWeight: 900, letterSpacing: wideChip ? 1 : 0.6,
+            borderRadius: 8, padding: wideChip ? "2px 8px" : "1.5px 6px", boxShadow: "0 2px 6px rgba(0,0,0,.3)",
           }}>
           YOUR TURN
         </motion.div>
@@ -617,6 +619,9 @@ function PokerTable({ view: v, bubbles }: { view: ExtendedView; bubbles: { id: n
   const me = v.viewerSeat;
   const n = v.handCounts.length;
   const rel = (seat: number) => (seat - me + n) % n;
+  const wide = useWide();
+  // mobile review #3 (round 2): rx 44% pushed the side plates' text off the viewport — tuck them in.
+  const seatRx = wide ? 44 : 39;
   return (
     <div style={{ flex: 1, minHeight: 300, position: "relative", margin: "2px 0" }}>
       {/* rail */}
@@ -648,7 +653,7 @@ function PokerTable({ view: v, bubbles }: { view: ExtendedView; bubbles: { id: n
 
       {/* seat plates around the rim (viewer at bottom, pulled slightly inward so controls below stay clear) */}
       {Array.from({ length: n }, (_, seat) => seat).map((seat) => {
-        const pos = seatPct(rel(seat), n, 44, seat === me ? 40 : 46);
+        const pos = seatPct(rel(seat), n, seatRx, seat === me ? 40 : 46);
         return (
           <div key={seat} style={{ position: "absolute", ...pos, transform: "translate(-50%,-50%)", zIndex: 4 }}>
             <SeatChip view={v} seat={seat} big={seat === me} bubbles={bubbles} />
@@ -730,12 +735,14 @@ function TrickOnFelt({ view: v }: { view: ExtendedView }) {
   const n = v.handCounts.length;
   const rel = (seat: number) => (seat - me + n) % n;
   const wide = useWide();
-  // mobile review #2: on portrait phones the landing ring sat under the seat plates and rail —
-  // pull trick cards toward the center and flatten the tilt.
-  const rx = wide ? 26 : 20;
-  const ryOther = wide ? 24 : 17.5;
+  // mobile review #2 (round 2): the ring must scale with the trick size — 4-5 players can hug
+  // the center, but 6-7 cards there just pile up. Wider ring + smaller cards for big tables.
+  const big = n >= 6;
+  const rx = wide ? 26 : big ? 24 : 20;
+  const ryOther = wide ? 24 : big ? 21 : 17.5;
   const ryMine = wide ? 17 : 14;
   const tiltAmp = wide ? 10 : 6;
+  const trickW = wide ? 52 : big ? 44 : 48; // smaller cards on phones, smallest at 6-7p
   return (
     <div ref={(el) => { trickEl = el; }}
       onClick={() => { if (last) setLastTrickOpen(true); }}
@@ -744,10 +751,11 @@ function TrickOnFelt({ view: v }: { view: ExtendedView }) {
         <motion.div initial={{ opacity: 0, scale: 0.7, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={SPRING}
           style={{
             position: "absolute", top: "32%", left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap",
-            background: "var(--gold)", color: "#fff", fontWeight: 800, borderRadius: 20, padding: "5px 16px", fontSize: 15,
+            background: "var(--gold)", color: "#fff", fontWeight: 800, borderRadius: 20, padding: "5px 16px", fontSize: wide ? 15 : 13.5,
             boxShadow: "0 4px 14px rgba(0,0,0,.35)",
+            maxWidth: "88%", overflow: "hidden", textOverflow: "ellipsis", // never clips off-screen (mobile review)
           }}>
-          <Face id={faceOf(v, linger.winnerSeat)} size={19} /> {linger.winnerSeat === me ? "You take" : `${firstName(v, linger.winnerSeat)} takes`} the hand
+          <Face id={faceOf(v, linger.winnerSeat)} size={19} /> {linger.winnerSeat === me ? "You take" : `${firstName(v, linger.winnerSeat)} takes`}{wide ? " the hand" : " it"}
           {(() => { const pts = linger.plays.reduce((a, p) => a + pv(p.card), 0); return pts > 0 ? ` +${pts}` : ""; })()}
         </motion.div>
       )}
@@ -774,7 +782,16 @@ function TrickOnFelt({ view: v }: { view: ExtendedView }) {
               transition={SPRING_SOFT}
               style={{ position: "absolute", transform: "translate(-50%,-50%)", marginLeft: -26, marginTop: -37 }}>
               <div style={{ borderRadius: 9, boxShadow: `0 0 0 2.5px ${SEAT_COLORS[p.seat % 7]}, 0 4px 10px rgba(0,0,0,.35)` }}>
-                <CardFace card={p.card} small highlight={!!winner && !!linger} />
+                <CardFace card={p.card} small highlight={!!winner && !!linger} width={trickW} />
+              </div>
+              {/* attribution chip: border color alone asks players to memorize six seat colors */}
+              <div style={{
+                textAlign: "center", fontSize: 9.5, fontWeight: 800, marginTop: 1, color: "#fff",
+                background: SEAT_COLORS[p.seat % 7], borderRadius: 6, padding: "0px 4px",
+                maxWidth: trickW + 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                marginLeft: "auto", marginRight: "auto", width: "fit-content", opacity: 0.92,
+              }}>
+                {p.seat === me ? "you" : firstName(v, p.seat)}
               </div>
               {winner && (
                 <div style={{ textAlign: "center", fontSize: 11, marginTop: 2, color: "#ffd97a", fontWeight: 800, textShadow: "0 1px 2px rgba(0,0,0,.5)" }}>✓</div>
@@ -858,7 +875,9 @@ function Hand({ view: v }: { view: ExtendedView }) {
     () => (myTurn ? new Set(legalPlays(v.ownHand as Card[], ledSuit as Suit | null).map((c) => `${c.rank}${c.suit}`)) : new Set<string>()),
     [myTurn, v.ownHand, ledSuit],
   );
-  const [focus, setFocus] = useState(0);
+  // -1 = no keyboard focus: the first card must NOT look pre-selected on touch devices
+  // (mobile review: the leftmost card appeared auto-chosen). Arrow keys summon focus.
+  const [focus, setFocus] = useState(-1);
   const [sortBy, setSortBy] = useState<"suit" | "rank">("suit");
   const RANK_ORDER = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
   const SUIT_DISPLAY: Suit[] = ["S", "H", "C", "D"];
@@ -873,9 +892,9 @@ function Hand({ view: v }: { view: ExtendedView }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (!myTurn) return;
-      if (e.key === "ArrowLeft") setFocus((f) => Math.max(0, f - 1));
-      if (e.key === "ArrowRight") setFocus((f) => Math.min(n - 1, f + 1));
-      if (e.key === "Enter") {
+      if (e.key === "ArrowLeft") setFocus((f) => (f < 0 ? n - 1 : Math.max(0, f - 1)));
+      if (e.key === "ArrowRight") setFocus((f) => (f < 0 ? 0 : Math.min(n - 1, f + 1)));
+      if (e.key === "Enter" && focus >= 0) {
         const c = hand[focus];
         if (c && legal.has(`${c.rank}${c.suit}`)) { sendAction("PLAY_CARD", { card: c }); sfx.thock(); }
       }
@@ -919,7 +938,7 @@ function Hand({ view: v }: { view: ExtendedView }) {
         return (
           <div key={`${base}-${copy}`} style={{ marginLeft: i === 0 ? 0 : overlap, transform: `rotate(${rot}deg) translateY(${lift}px)`, zIndex: i, flexShrink: 0 }}>
             <DraggableCard card={c} width={cardW} playable={myTurn && legal.has(`${c.rank}${c.suit}`)}
-              dimmed={myTurn && !legal.has(`${c.rank}${c.suit}`)} focused={myTurn && i === focus} />
+              dimmed={myTurn && !legal.has(`${c.rank}${c.suit}`)} focused={myTurn && focus >= 0 && i === focus} />
           </div>
         );
       }); })()}
@@ -1524,6 +1543,21 @@ function PartnerStatus({ view: v }: { view: ExtendedView }) {
   const me = v.viewerSeat;
   const wide = useWide();
   if (v.declarerSeat === null || v.calledCards.length === 0 || v.phase === "GAME_END") return null;
+  // mobile review (round 2) #6: don't keep chanting "you need 150 together" after the round ended —
+  // the strip flips to the verdict while the table sits in ROUND_END.
+  if (v.phase === "ROUND_END") {
+    if (v.lastRoundSuccess === null) return null;
+    const made = v.lastRoundSuccess;
+    return (
+      <div style={{
+        textAlign: "center", padding: "5px 10px", margin: "2px 0 4px", borderRadius: 8, fontSize: wide ? 13.5 : 12.5,
+        fontWeight: 800, background: made ? "var(--gold)" : "var(--ink)", color: made ? "#fff" : "var(--parchment)",
+        position: "relative", zIndex: 6,
+      }}>
+        {made ? <>✅ Bid MADE — {firstName(v, v.declarerSeat)}'s side got there</> : <>❌ Bid failed — the defenders held the line</>}
+      </div>
+    );
+  }
   const iAmDeclarer = v.declarerSeat === me;
   const partners = v.revealedTeamMembers.filter((s) => s !== v.declarerSeat);
   const calledStr = v.calledCards.map(ck).join(" + ");
