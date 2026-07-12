@@ -41,6 +41,8 @@ interface AppState {
   stageTrump(suit: string): void;
   confirmStagedTrump(): void;
   setRoomInfo(r: AppState["roomInfo"]): void;
+  /** Leave the table/lobby on this device: wipe game state, back to Home. */
+  resetToHome(): void;
 }
 
 let toastId = 0;
@@ -85,4 +87,8 @@ export const useStore = create<AppState>((set) => ({
   stageTrump: (stagedTrump) => set({ stagedTrump, stagedConfirmed: false }),
   confirmStagedTrump: () => set({ stagedConfirmed: true }),
   setRoomInfo: (roomInfo) => set({ roomInfo }),
+  resetToHome: () => set({
+    screen: "home", view: null, stateVersion: 0, events: [], roomInfo: null,
+    connection: "idle", stagedTrump: null, stagedConfirmed: false, lastTrickOpen: false, flights: [],
+  }),
 }));

@@ -92,6 +92,17 @@ export class RoomDO implements DurableObject {
         if (!r.ok) return json({ error: "no bot to remove" }, 400);
         return json({ members: this.core.members });
       }
+      case "/leave": {
+        // Lobby: actually removes the member (host migrates if needed). Mid-game: seats are
+        // immutable (§3.4) — the client just disconnects and the away fast-forward takes over.
+        this.core.leave(accountId);
+        this.core.setConnected(accountId, false);
+        for (const ws of this.ctx.getWebSockets()) {
+          try { if ((ws.deserializeAttachment() as Attachment)?.accountId === accountId) ws.close(1000, "left"); } catch { /* ignore */ }
+        }
+        this.core.pushViews();
+        return json({ ok: true });
+      }
       case "/state":
         return json({
           phase: this.core.phase, members: this.core.members, host: this.core.hostAccountId,

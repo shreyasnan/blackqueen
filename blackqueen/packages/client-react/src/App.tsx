@@ -5,7 +5,7 @@ import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-24-mobile-round2"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-25-leave-colors"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -268,10 +268,17 @@ function Lobby({ auth }: { auth: AuthState }) {
 
   if (!roomInfo) return null;
   const isHost = roomInfo.host === auth.accountId;
+  const leaveLobby = async () => {
+    if (!window.confirm(isHost && roomInfo.members.length > 1 ? "Leave? Someone else becomes host." : "Leave this lobby?")) return;
+    try { await api(`/api/rooms/${roomInfo.roomId}/leave`, {}); } catch { /* best effort */ }
+    useStore.getState().resetToHome();
+  };
   return (
     <div>
       {roomInfo.code && (
         <div style={{ textAlign: "center", margin: "14px 0" }}>
+          <button onClick={leaveLobby} aria-label="leave lobby"
+            style={{ ...btnSec, padding: "4px 10px", fontSize: 12, float: "left" }}>↩ leave</button>
           <div style={{ color: "var(--ink-soft)" }}>Invite code</div>
           <div style={{ fontSize: 42, letterSpacing: 8, fontWeight: 700, cursor: "pointer" }}
                onClick={() => { navigator.clipboard?.writeText(roomInfo.code!); pushToast("Code copied"); }}>

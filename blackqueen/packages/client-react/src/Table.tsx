@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useAnimate } from "motion/react";
 import { useStore, ExtendedView, GameEvent } from "./store";
-import { sendAction } from "./net";
+import { sendAction, api, disconnect, getRoomId } from "./net";
 import { legalPlays } from "@engine/tricks"; // the ONE permitted engine function (UI_SPEC §14)
 import type { Card, Suit } from "@engine/cards";
 import { btn, btnSec, inp } from "./App";
@@ -365,8 +365,25 @@ function HUD({ view: v, onMute }: { view: ExtendedView; onMute: () => void }) {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", padding: "4px 2px", gap: 8 }}>
-      <div style={{ fontSize: 13, color: "var(--ink-soft)", fontWeight: 700, letterSpacing: 0.4 }}>
-        ROUND {v.roundNumber}<span style={{ opacity: 0.5 }}>/{v.N}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <button aria-label="leave table" title="Leave the table"
+          style={{ ...btnSec, padding: "4px 8px", fontSize: 12, borderRadius: 8, flexShrink: 0 }}
+          onClick={() => {
+            const inGame = v.phase !== "GAME_END";
+            const msg = inGame
+              ? "Leave the table? The game continues — the table plays your cards until you come back (reopen the same link to rejoin)."
+              : "Leave the table?";
+            if (!window.confirm(msg)) return;
+            const rid = getRoomId();
+            if (rid) void api(`/api/rooms/${rid}/leave`, {}).catch(() => { /* best effort */ });
+            disconnect();
+            useStore.getState().resetToHome();
+          }}>
+          ↩
+        </button>
+        <div style={{ fontSize: 13, color: "var(--ink-soft)", fontWeight: 700, letterSpacing: 0.4, whiteSpace: "nowrap" }}>
+          ROUND {v.roundNumber}<span style={{ opacity: 0.5 }}>/{v.N}</span>
+        </div>
       </div>
       <motion.div key={turnText} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
         style={{ fontWeight: 800, fontSize: 15, color: v.turnSeat === me || (v.phase === "DECLARER_SETUP" && isDeclarer) ? "var(--gold)" : "var(--ink)" }}>
@@ -496,13 +513,17 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
       animate={{
         scale: active ? 1.1 : 1, y: active ? -3 : 0,
         opacity: anyoneActive && !active ? 0.87 : 1, // non-actors recede gently — dimmed, never "disabled"
-        background: active ? "linear-gradient(170deg, #fffdf7, #fbf0d4)"
-          : side === "team" ? "linear-gradient(170deg, #fdf6e3, #f6e5b8)"
-          : side === "def" ? "linear-gradient(170deg, #eef6f4, #d8eae5)"
+        // A DEFENDER NEVER TURNS GOLD (mobile review round 3): gold = declarer's side, teal = defense,
+        // even while acting. Activity is carried by the glow/scale/pointer, not by stealing team colors.
+        background: side === "def" ? (active ? "linear-gradient(170deg, #f2fbf8, #cfeae2)" : "linear-gradient(170deg, #eef6f4, #d8eae5)")
+          : side === "team" ? (active ? "linear-gradient(170deg, #fffdf7, #fbf0d4)" : "linear-gradient(170deg, #fdf6e3, #f6e5b8)")
+          : active ? "linear-gradient(170deg, #fffdf7, #fbf0d4)"
           : "linear-gradient(170deg, #fffdf7, #fffdf7)",
-        borderColor: active ? "#c9992e" : side === "team" ? "#c9992e" : side === "def" ? "#2e8f83" : team ? SEAT_COLORS[seat % 7]! : "rgba(59,34,71,.14)",
+        borderColor: side === "def" ? "#2e8f83" : side === "team" ? "#c9992e" : active ? "#c9992e" : team ? SEAT_COLORS[seat % 7]! : "rgba(59,34,71,.14)",
         boxShadow: active
-          ? ["0 0 14px rgba(201,153,46,.5), 0 2px 6px rgba(59,34,71,.25)", "0 0 30px rgba(201,153,46,.95), 0 2px 6px rgba(59,34,71,.25)", "0 0 14px rgba(201,153,46,.5), 0 2px 6px rgba(59,34,71,.25)"]
+          ? side === "def"
+            ? ["0 0 14px rgba(46,143,131,.5), 0 2px 6px rgba(59,34,71,.25)", "0 0 30px rgba(46,143,131,.95), 0 2px 6px rgba(59,34,71,.25)", "0 0 14px rgba(46,143,131,.5), 0 2px 6px rgba(59,34,71,.25)"]
+            : ["0 0 14px rgba(201,153,46,.5), 0 2px 6px rgba(59,34,71,.25)", "0 0 30px rgba(201,153,46,.95), 0 2px 6px rgba(59,34,71,.25)", "0 0 14px rgba(201,153,46,.5), 0 2px 6px rgba(59,34,71,.25)"]
           : side === "team" // declarer's side stays visibly lit even off-turn — you always know who's with whom
             ? "0 0 12px rgba(201,153,46,.55), 0 2px 5px rgba(59,34,71,.25)"
             : "0 2px 5px rgba(59,34,71,.25)",
@@ -746,11 +767,13 @@ function TrickOnFelt({ view: v }: { view: ExtendedView }) {
   return (
     <div ref={(el) => { trickEl = el; }}
       onClick={() => { if (last) setLastTrickOpen(true); }}
-      style={{ position: "absolute", inset: 0, cursor: last ? "pointer" : "default", zIndex: 3 }}>
+      // while the winner banner lingers, this layer rises ABOVE the seat plates — the trick
+      // container is a stacking context, so the banner was painting UNDER neighboring plates
+      style={{ position: "absolute", inset: 0, cursor: last ? "pointer" : "default", zIndex: linger ? 6 : 3 }}>
       {linger && (
         <motion.div initial={{ opacity: 0, scale: 0.7, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={SPRING}
           style={{
-            position: "absolute", top: "32%", left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap",
+            position: "absolute", top: "26%", left: "50%", transform: "translateX(-50%)", zIndex: 8, whiteSpace: "nowrap",
             background: "var(--gold)", color: "#fff", fontWeight: 800, borderRadius: 20, padding: "5px 16px", fontSize: wide ? 15 : 13.5,
             boxShadow: "0 4px 14px rgba(0,0,0,.35)",
             maxWidth: "88%", overflow: "hidden", textOverflow: "ellipsis", // never clips off-screen (mobile review)

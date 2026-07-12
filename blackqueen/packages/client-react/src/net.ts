@@ -93,6 +93,18 @@ let lastSeq = 0;
 const eventBuffer = new Map<number, any>();
 
 export function getStateVersion() { return stateVersion; }
+export function getRoomId() { return roomId; }
+
+/** Deliberate leave: kill the socket WITHOUT the auto-reconnect loop (roomId null gates it). */
+export function disconnect(): void {
+  const w = ws;
+  ws = null;
+  roomId = null;
+  stateVersion = 0;
+  lastSeq = 0;
+  eventBuffer.clear();
+  try { w?.close(1000, "left"); } catch { /* already closed */ }
+}
 
 export async function connect(rid: string): Promise<void> {
   roomId = rid;
