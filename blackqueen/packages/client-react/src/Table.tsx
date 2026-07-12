@@ -518,6 +518,26 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
         borderRadius: 12, padding: big ? "6px 10px 5px" : "4px 7px 4px",
         borderWidth: 2.5, borderStyle: "solid",
       }}>
+      {/* the unmissable JOIN flash: expanding gold rings + badge the moment this seat is revealed */}
+      <AnimatePresence>
+        {flash && !REDUCED && (
+          <>
+            {[0, 0.25, 0.5].map((d) => (
+              <motion.div key={d} initial={{ opacity: 0.9, scale: 1 }} animate={{ opacity: 0, scale: 2.1 }} exit={{ opacity: 0 }}
+                transition={{ duration: 1.1, delay: d, ease: "easeOut" }}
+                style={{ position: "absolute", inset: -4, borderRadius: 14, border: "3px solid var(--gold)", pointerEvents: "none", zIndex: 11 }} />
+            ))}
+            <motion.div initial={{ scale: 0, rotate: -12 }} animate={{ scale: [0, 1.3, 1] }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.5 }}
+              style={{
+                position: "absolute", top: -34, left: "50%", transform: "translateX(-50%)", zIndex: 12, whiteSpace: "nowrap",
+                background: "var(--gold)", color: "#fff", fontSize: 11.5, fontWeight: 900, letterSpacing: 0.8,
+                borderRadius: 9, padding: "3px 10px", boxShadow: "0 0 18px rgba(201,153,46,.9), 0 3px 8px rgba(0,0,0,.35)",
+              }}>
+              ⭐ JOINS THE TEAM
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
       {/* the unmissable pointer: bobbing marker above whoever must act */}
       <AnimatePresence>
         {active && !REDUCED && (
