@@ -243,7 +243,7 @@ describe("Full-game smoke — N rounds to GAME_END with competition ranks", () =
 
 describe("CLAIM-001/002 — 2-deck claim model (TEST_CASES §11)", () => {
   function setup2Deck(): GameState {
-    let s = initGame(6, 2, 0, 2); // 6 players, 2 decks, C=2 default
+    let s = initGame(6, 2, 0, 2, undefined, 17); // 6 players, 2 decks, C=2 default, whole deck (102 plays)
     s = ok(s, { type: "START_ROUND", seed, abandonedSeats: [] }).state;
     let guard = 0;
     while (s.phase === "BIDDING" && guard++ < 12) s = ok(s, { type: "PASS", seat: s.round!.turnSeat! }).state;
@@ -292,7 +292,7 @@ describe("CLAIM-001/002 — 2-deck claim model (TEST_CASES §11)", () => {
   });
 
   it("duplicate identities rejected in CALL_CARDS; one-copy-per-play removal", () => {
-    let s = initGame(6, 2, 0, 2);
+    let s = initGame(6, 2, 0, 2, undefined, 17);
     s = ok(s, { type: "START_ROUND", seed, abandonedSeats: [] }).state;
     let guard = 0;
     while (s.phase === "BIDDING" && guard++ < 12) s = ok(s, { type: "PASS", seat: s.round!.turnSeat! }).state;

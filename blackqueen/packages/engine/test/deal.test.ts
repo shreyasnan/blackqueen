@@ -59,17 +59,17 @@ describe("CONFIG-001 — deck & shares per player count", () => {
 // ---------------- v2.0: two-deck mode ----------------
 
 describe("CONFIG-004 — 2-deck trim, points, bounds (TEST_CASES §11)", () => {
-  it("6p: 102 cards / 17 each; removes one 2♣ + one 2♦", () => {
-    expect(trimmedDeckSize(6, 2)).toBe(102);
-    expect(removedCards(6, 2).map(cardKey).sort()).toEqual(["2C", "2D"]);
-    expect(canonicalDeck(6, 2).length).toBe(102);
+  it("6p: 102 cards / 17 each; removes one 2♣ + one 2♦ (whole deck, handSize 17)", () => {
+    expect(trimmedDeckSize(6, 2, 17)).toBe(102);
+    expect(removedCards(6, 2, 17).map(cardKey).sort()).toEqual(["2C", "2D"]);
+    expect(canonicalDeck(6, 2, 17).length).toBe(102);
   });
   it("7p: 98 cards / 14 each; removes both 2♣, both 2♦, one 2♥, one 2♠", () => {
-    expect(trimmedDeckSize(7, 2)).toBe(98);
-    expect(removedCards(7, 2).map(cardKey).sort()).toEqual(["2C", "2C", "2D", "2D", "2H", "2S"]);
+    expect(trimmedDeckSize(7, 2, 14)).toBe(98);
+    expect(removedCards(7, 2, 14).map(cardKey).sort()).toEqual(["2C", "2C", "2D", "2D", "2H", "2S"]);
   });
   it("300 points, two Queens, both worth 30", () => {
-    const deck = canonicalDeck(6, 2);
+    const deck = canonicalDeck(6, 2, 17);
     expect(deck.reduce((s, c) => s + pointValue(c), 0)).toBe(300);
     expect(deck.filter((c) => c.rank === "Q" && c.suit === "S").length).toBe(2);
   });
