@@ -348,6 +348,7 @@ const Shell = ({ children, wide }: { children: React.ReactNode; wide: boolean })
 
 /* ------------------------------ HUD: what matters, where you look ------------------------------ */
 function HUD({ view: v, onMute }: { view: ExtendedView; onMute: () => void }) {
+  const wide = useWide();
   const stagedLocal = useStore((s) => s.stagedTrump);
   const stagedTrump = stagedLocal ?? v.stagedTrumpOwn ?? null;
   const stagedConfirmed = useStore((s) => s.stagedConfirmed);
@@ -390,14 +391,14 @@ function HUD({ view: v, onMute }: { view: ExtendedView; onMute: () => void }) {
             ))}
           </div>
         )}
-        {v.completedTricks.length > 0 && (
+        {v.completedTricks.length > 0 && ( // mobile review #4: icon-only on phones, same footprint as mute
           <button aria-label="review last hand" title="Last hand (T)"
-            style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8 }}
+            style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, whiteSpace: "nowrap" }}
             onClick={() => useStore.getState().setLastTrickOpen(true)}>
-            🕐 last hand
+            {wide ? "🕐 last hand" : "🕐"}
           </button>
         )}
-        <button aria-label="mute" style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8 }} onClick={() => { toggleMute(); onMute(); }}>
+        <button aria-label="mute" style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, flexShrink: 0 }} onClick={() => { toggleMute(); onMute(); }}>
           {isMuted() ? "🔇" : "🔊"}
         </button>
       </div>
@@ -554,7 +555,7 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
       {active && seat === me && (
         <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING}
           style={{
-            position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)", zIndex: 10, whiteSpace: "nowrap",
+            position: "absolute", top: -13, left: "50%", transform: "translateX(-50%)", zIndex: 10, whiteSpace: "nowrap",
             background: "var(--coral)", color: "#fff", fontSize: 10.5, fontWeight: 900, letterSpacing: 1,
             borderRadius: 8, padding: "2px 8px", boxShadow: "0 2px 6px rgba(0,0,0,.3)",
           }}>
@@ -636,7 +637,7 @@ function PokerTable({ view: v, bubbles }: { view: ExtendedView; bubbles: { id: n
         border: "1.5px solid rgba(255,253,247,.14)", pointerEvents: "none",
       }} />
       {/* subtle center mark */}
-      <div style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%,-50%)", fontSize: 42, opacity: 0.09, pointerEvents: "none", filter: "grayscale(60%)" }}>👸🏽</div>
+      <WatermarkQueen />
 
       <TrickOnFelt view={v} />
 
@@ -659,6 +660,15 @@ function PokerTable({ view: v, bubbles }: { view: ExtendedView; bubbles: { id: n
 }
 
 // (ContractOnFelt retired after playtest — the cluster fought the trick ring for space.)
+
+/** Center watermark — near-invisible texture on desktop; on small phones the emoji rendered as a
+ *  pale floating square behind trick cards (mobile review #6), so fade it almost out there. */
+function WatermarkQueen() {
+  const wide = useWide();
+  return (
+    <div style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%,-50%)", fontSize: wide ? 42 : 30, opacity: wide ? 0.09 : 0.035, pointerEvents: "none", filter: "grayscale(60%)" }}>👸🏽</div>
+  );
+}
 
 function FeltStatus({ view: v }: { view: ExtendedView }) {
   let line: string | null = null;
@@ -719,6 +729,13 @@ function TrickOnFelt({ view: v }: { view: ExtendedView }) {
   const me = v.viewerSeat;
   const n = v.handCounts.length;
   const rel = (seat: number) => (seat - me + n) % n;
+  const wide = useWide();
+  // mobile review #2: on portrait phones the landing ring sat under the seat plates and rail —
+  // pull trick cards toward the center and flatten the tilt.
+  const rx = wide ? 26 : 20;
+  const ryOther = wide ? 24 : 17.5;
+  const ryMine = wide ? 17 : 14;
+  const tiltAmp = wide ? 10 : 6;
   return (
     <div ref={(el) => { trickEl = el; }}
       onClick={() => { if (last) setLastTrickOpen(true); }}
@@ -745,9 +762,9 @@ function TrickOnFelt({ view: v }: { view: ExtendedView }) {
           // the card lands in front of its player: position IS attribution (broadcast-style)
           // U4: the bottom seat's plate sits higher (hand fan below) — pull MY landed card
           // further up-table so it never covers my seat plate / captured-points count.
-          const pos = seatPct(rel(p.seat), n, 26, rel(p.seat) === 0 ? 17 : 24);
+          const pos = seatPct(rel(p.seat), n, rx, rel(p.seat) === 0 ? ryMine : ryOther);
           const a = seatAngle(rel(p.seat), n);
-          const tilt = (Math.cos(a) * -10).toFixed(1); // slight face-the-center tilt
+          const tilt = (Math.cos(a) * -tiltAmp).toFixed(1); // slight face-the-center tilt
           const from = seatPct(rel(p.seat), n, 44, 46);
           return (
             <motion.div key={`${p.seat}-${p.card.rank}${p.card.suit}`}
@@ -935,9 +952,10 @@ function DraggableCard({ card, playable, dimmed, focused, width }: { card: Card;
       animate={{ y: armed ? -24 : focused ? -14 : playable ? -8 : 0, scale: armed ? 1.08 : 1, zIndex: armed ? 55 : undefined }}
       style={{
         position: "relative", cursor: playable ? "grab" : "default", touchAction: "none",
-        // it's your turn: playable cards RISE and glow; unplayable ones recede gently (never vanish)
-        opacity: dimmed ? 0.55 : 1,
-        filter: dimmed ? "grayscale(45%)" : playable ? "drop-shadow(0 4px 10px rgba(201,153,46,.45))" : "none",
+        // it's your turn: playable cards RISE and glow; unplayable ones recede but STAY READABLE —
+        // (mobile review #1: 0.55 + grayscale made red ranks vanish on the cream table)
+        opacity: dimmed ? 0.78 : 1,
+        filter: dimmed ? "saturate(0.75) brightness(0.96)" : playable ? "drop-shadow(0 4px 10px rgba(201,153,46,.45))" : "none",
       }}>
       {armed && ( // unmistakable confirmation of WHICH card is armed (misplay protection)
         <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
@@ -1169,28 +1187,46 @@ function feedLine(v: ExtendedView | null) {
 /* ------------------------------ drawer: totals + team bar + history ------------------------------ */
 function BottomDrawer({ view: v }: { view: ExtendedView }) {
   const [open, setOpen] = useState(false);
-  const teamsKnown = v.allPartnersRevealed;
-  const teamPts = teamsKnown ? v.revealedTeamMembers.reduce((a, s) => a + (v.perPlayerCapturedPoints[s] ?? 0), 0) : null;
+  // team chase is meaningful as soon as the contract exists — declarer side pts are public by claim
+  const teamPts = v.revealedTeamMembers.length > 0 ? v.revealedTeamMembers.reduce((a, s) => a + (v.perPlayerCapturedPoints[s] ?? 0), 0) : null;
   return (
     <div style={{ borderTop: "1.5px solid rgba(59,34,71,.15)", paddingTop: 4 }}>
+      {/* mobile review #5: six tiny "avatar 0" chips were noise. One meaningful line instead:
+          the team chase once the contract exists, else the score leaders; full scores live in history. */}
       <div onClick={() => setOpen((x) => !x)}
-        style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", alignItems: "center", fontSize: 13, cursor: "pointer", padding: "2px 0" }}>
-        {v.totalScore.map((t, s) => (
-          <span key={s} style={{ color: "var(--ink-soft)" }}>
-            <Face id={faceOf(v, s)} size={17} /> <b style={{ color: t < 0 ? "var(--coral)" : "var(--ink)" }}>{t}</b>
-          </span>
-        ))}
-        {teamsKnown && v.Y !== null && teamPts !== null && (
+        style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "center", fontSize: 13, cursor: "pointer", padding: "2px 0" }}>
+        {v.Y !== null && teamPts !== null ? (
           <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontWeight: 800, color: "var(--coral)" }}>team {teamPts}/{v.Y}</span>
-            <div style={{ width: 90, height: 8, background: "rgba(59,34,71,.15)", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ width: 110, height: 8, background: "rgba(59,34,71,.15)", borderRadius: 4, overflow: "hidden" }}>
               <motion.div animate={{ width: `${Math.min(100, (teamPts / v.Y) * 100)}%` }}
                 style={{ height: "100%", background: teamPts >= v.Y ? "var(--teal)" : "var(--gold)" }} />
             </div>
           </motion.div>
-        )}
-        <span style={{ color: "var(--ink-soft)", fontSize: 11 }}>{open ? "▾ hide history" : "▸ history"}</span>
+        ) : (() => {
+          const any = v.totalScore.some((t) => t !== 0) || v.perPlayerCapturedPoints.some((p) => p > 0);
+          if (!any) return <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>scores appear here</span>;
+          const lead = v.totalScore.map((t, s) => ({ t: t + (v.perPlayerCapturedPoints[s] ?? 0) * 0, s, cap: v.perPlayerCapturedPoints[s] ?? 0 }))
+            .sort((a, b) => b.t - a.t || b.cap - a.cap).slice(0, 2);
+          return lead.map(({ s, t, cap }) => (
+            <span key={s} style={{ color: "var(--ink-soft)" }}>
+              <Face id={faceOf(v, s)} size={17} /> {s === v.viewerSeat ? "you" : firstName(v, s)} <b style={{ color: t < 0 ? "var(--coral)" : "var(--ink)" }}>{t}</b>
+              {cap > 0 && <span style={{ fontSize: 11 }}> (+{cap})</span>}
+            </span>
+          ));
+        })()}
+        <span style={{ color: "var(--ink)", opacity: 0.75, fontSize: 12, fontWeight: 700 }}>{open ? "▾ hide history" : "▸ history"}</span>
       </div>
+      {open && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", fontSize: 12.5, padding: "3px 0" }}>
+          {v.totalScore.map((t, s) => (
+            <span key={s} style={{ color: "var(--ink-soft)" }}>
+              <Face id={faceOf(v, s)} size={16} /> <b style={{ color: t < 0 ? "var(--coral)" : "var(--ink)" }}>{t}</b>
+              {(v.perPlayerCapturedPoints[s] ?? 0) > 0 && <span style={{ fontSize: 11 }}> +{v.perPlayerCapturedPoints[s]}</span>}
+            </span>
+          ))}
+        </div>
+      )}
       {open && <EventLog />}
     </div>
   );
@@ -1486,6 +1522,7 @@ function CardBack() {
 /* ------------------------------ partner status ------------------------------ */
 function PartnerStatus({ view: v }: { view: ExtendedView }) {
   const me = v.viewerSeat;
+  const wide = useWide();
   if (v.declarerSeat === null || v.calledCards.length === 0 || v.phase === "GAME_END") return null;
   const iAmDeclarer = v.declarerSeat === me;
   const partners = v.revealedTeamMembers.filter((s) => s !== v.declarerSeat);
@@ -1502,7 +1539,10 @@ function PartnerStatus({ view: v }: { view: ExtendedView }) {
         ? <>You claimed your own called card{v.calledCount! > 1 ? "s" : ""} — <b>you are SOLO</b>. Everyone is against you.</>
         : <>Your partner{partners.length > 1 ? "s" : ""}: <b>{names(partners)}</b> 🤝</>;
     } else if (twoDeck) {
-      text = <>{partners.length > 0 && <><b>{names(partners)}</b> is with you; </>}the <b>first player to play</b> {calledStr} joins your team — <b>nobody knows who yet</b>{holdCalled.length > 0 && <>. You hold {holdCalled.length > 1 ? "copies" : "a copy"} — play it first to go solo</>}.</>;
+      // mobile review #3: the full sentence wrapped under the top seat plate — keep phones to one line
+      text = wide
+        ? <>{partners.length > 0 && <><b>{names(partners)}</b> is with you; </>}the <b>first player to play</b> {calledStr} joins your team — <b>nobody knows who yet</b>{holdCalled.length > 0 && <>. You hold {holdCalled.length > 1 ? "copies" : "a copy"} — play it first to go solo</>}.</>
+        : <>{partners.length > 0 && <><b>{names(partners)}</b> + </>}<b>first to play</b> {calledStr} <b>joins you</b></>;
     } else if (holdCalled.length === v.calledCards.length) {
       text = <>You hold {calledStr} yourself — <b>you're going SOLO</b> (nobody knows yet).</>;
     } else {
@@ -1519,11 +1559,16 @@ function PartnerStatus({ view: v }: { view: ExtendedView }) {
     text = v.allPartnersRevealed
       ? <>Teams are known: <b>{names([v.declarerSeat, ...partners])}</b> vs. the rest. Hold them under <b>{v.Y}</b>.</>
       : twoDeck
-        ? <>The <b>first player to play</b> {calledStr} joins the declarer. Watch every card…</>
+        ? wide ? <>The <b>first player to play</b> {calledStr} joins the declarer. Watch every card…</> : <><b>First to play</b> {calledStr} <b>joins {firstName(v, v.declarerSeat)}</b></>
         : <>Someone secretly holds {calledStr}. Watch closely…</>;
   }
   return (
-    <div style={{ textAlign: "center", padding: "5px 10px", margin: "2px 0", borderRadius: 8, fontSize: 13.5, background: strong ? "var(--gold)" : "rgba(255,253,247,.75)", color: strong ? "#fff" : "var(--ink)", border: "1px solid rgba(59,34,71,.12)" }}>
+    <div style={{
+      textAlign: "center", padding: "5px 10px", margin: "2px 0 4px", borderRadius: 8, fontSize: wide ? 13.5 : 12.5,
+      background: strong ? "var(--gold)" : "rgba(255,253,247,.9)", color: strong ? "#fff" : "var(--ink)",
+      border: "1px solid rgba(59,34,71,.12)", position: "relative", zIndex: 6, // above the top seat plate — never half-hidden
+      whiteSpace: wide ? "normal" : "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+    }}>
       {text}
     </div>
   );
