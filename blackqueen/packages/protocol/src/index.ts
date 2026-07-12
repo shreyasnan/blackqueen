@@ -57,5 +57,6 @@ export const CreateRoomSchema = z.object({
   graceMs: z.number().int().min(1000).default(15000),
   deckCount: z.union([z.literal(1), z.literal(2)]).default(1), // GAME_SPEC v2.0 §16; 2 → 6–7 players (validated at start)
   calledCount: z.number().int().min(1).max(3).optional(), // 2-deck only; default 2
+  handSize: z.number().int().min(7).max(17).optional(), // v2.1 §3.2; clamped at start to the actual table's legal range
 }).strict();
 export const JoinRoomSchema = z.object({ code: z.string().length(6) }).strict();

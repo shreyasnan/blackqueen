@@ -1,6 +1,6 @@
 // KAT-001 + CONFIG-001 (TEST_CASES.md §7)
 import { describe, expect, it } from "vitest";
-import { deal, canonicalDeck, removedCards, trimmedDeckSize, calledCardCount, pointValue, cardKey, initGame } from "../src/index.js";
+import { deal, canonicalDeck, removedCards, trimmedDeckSize, calledCardCount, pointValue, cardKey, initGame, minHandSize, maxHandSize, defaultHandSize } from "../src/index.js";
 
 const seed = new Uint8Array(Array.from({ length: 32 }, (_, i) => i));
 
@@ -95,11 +95,11 @@ describe("KAT-002 — 2-deck known-answer deal vector (REQUIRED conformance)", (
     "10D 2C 7S AH 9H 10C 2S 3C 8C 3S 5D KH QC AC AS 5S QC",
   ].map((s) => s.split(" "));
   it("reproduces the exact 2-deck hands, in deal order", () => {
-    const hands = deal(6, 0, seed, 2);
+    const hands = deal(6, 0, seed, 2, 17); // handSize pinned: KAT-002 is the whole-deck vector
     expect(hands.map((h) => h.map(cardKey))).toEqual(KAT2);
   });
   it("union is the trimmed 102-card multiset; 300 points", () => {
-    const all = deal(6, 0, seed, 2).flat();
+    const all = deal(6, 0, seed, 2, 17).flat();
     expect(all.length).toBe(102);
     expect(all.reduce((s, c) => s + pointValue(c), 0)).toBe(300);
     // exactly deckCount copies of every non-trimmed identity
@@ -109,5 +109,52 @@ describe("KAT-002 — 2-deck known-answer deal vector (REQUIRED conformance)", (
     expect(counts.get("2C")).toBe(1); // one copy trimmed at 6p
     expect(counts.get("2D")).toBe(1);
     expect(counts.get("2H")).toBe(2);
+  });
+});
+
+describe("CONFIG-005 — v2.1 creator-selectable hand size (TEST_CASES §12)", () => {
+  it("bounds: max = whole deck, min = 8 (1 deck) / 10 (2 decks), clamped at tiny tables", () => {
+    expect(maxHandSize(4, 1)).toBe(13); expect(minHandSize(4, 1)).toBe(8);
+    expect(maxHandSize(7, 1)).toBe(7);  expect(minHandSize(7, 1)).toBe(7); // clamp: only one legal size
+    expect(maxHandSize(6, 2)).toBe(17); expect(minHandSize(6, 2)).toBe(10);
+    expect(maxHandSize(7, 2)).toBe(14); expect(minHandSize(7, 2)).toBe(10);
+  });
+  it("defaults: 1 deck deals everything (pre-v2.1 behavior); 2 decks default to 12", () => {
+    expect(defaultHandSize(4, 1)).toBe(13);
+    expect(defaultHandSize(6, 2)).toBe(12);
+    expect(defaultHandSize(7, 2)).toBe(12);
+    expect(initGame(6, 12, 0, 2).handSize).toBe(12);
+    expect(initGame(4, 8, 0).handSize).toBe(13);
+  });
+  it("trim never removes a point card; total stays 150 x deckCount at every legal size", () => {
+    for (const [pc, dc] of [[4, 1], [5, 1], [6, 1], [7, 1], [6, 2], [7, 2]] as const) {
+      for (let h = minHandSize(pc, dc); h <= maxHandSize(pc, dc); h++) {
+        const deck = canonicalDeck(pc, dc, h);
+        expect(deck.length).toBe(pc * h);
+        expect(deck.reduce((s, c) => s + pointValue(c), 0)).toBe(150 * dc);
+        expect(removedCards(pc, dc, h).every((c) => pointValue(c) === 0)).toBe(true);
+      }
+    }
+  });
+  it("6p/2-deck/handSize 10: removes 44 non-point copies, lowest ranks first", () => {
+    const removed = removedCards(6, 2, 10);
+    expect(removed.length).toBe(44);
+    // ranks 2,3,4,6,7 fully gone (8 copies each = 40), then copy-1 of 8C,8D,8H,8S
+    const byRank = (r: string) => removed.filter((c) => c.rank === r).length;
+    expect([byRank("2"), byRank("3"), byRank("4"), byRank("6"), byRank("7"), byRank("8")]).toEqual([8, 8, 8, 8, 8, 4]);
+    expect(byRank("5")).toBe(0); // point rank untouched
+  });
+  it("out-of-range hand sizes rejected by initGame", () => {
+    expect(() => initGame(6, 12, 0, 2, 2, 9)).toThrow();
+    expect(() => initGame(6, 12, 0, 2, 2, 18)).toThrow();
+    expect(() => initGame(4, 8, 0, 1, undefined, 7)).toThrow();
+    expect(initGame(6, 12, 0, 2, 2, 17).handSize).toBe(17);
+    expect(initGame(4, 8, 0, 1, undefined, 8).handSize).toBe(8);
+  });
+  it("deal at a chosen size is deterministic and dealt evenly", () => {
+    const seedb = new Uint8Array(Array.from({ length: 32 }, (_, i) => i));
+    const hands = deal(6, 0, seedb, 2, 12);
+    expect(hands.every((h) => h.length === 12)).toBe(true);
+    expect(JSON.stringify(deal(6, 0, seedb, 2, 12))).toBe(JSON.stringify(hands));
   });
 });

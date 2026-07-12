@@ -9,10 +9,10 @@ import {
 } from "../src/index.js";
 
 /** Deterministic pseudo-driver: plays a full game making rng-driven legal choices. */
-function driveGame(playerCount: number, N: number, rngSeq: number[], deckCount = 1): { finals: GameState; log: Action[]; states: GameState[] } {
+function driveGame(playerCount: number, N: number, rngSeq: number[], deckCount = 1, handSize?: number): { finals: GameState; log: Action[]; states: GameState[] } {
   let rp = 0;
   const rnd = (n: number) => rngSeq[rp++ % rngSeq.length]! % n;
-  let s = initGame(playerCount, N, rnd(playerCount), deckCount);
+  let s = initGame(playerCount, N, rnd(playerCount), deckCount, undefined, handSize);
   const log: Action[] = [];
   const states: GameState[] = [s];
   const apply = (a: Action) => {
@@ -47,7 +47,7 @@ function driveGame(playerCount: number, N: number, rngSeq: number[], deckCount =
         apply({ type: "CHOOSE_TRUMP", seat: s.round!.declarerSeat, suit: SUITS[rnd(4)]! });
         break;
       case "CALLING_PARTNERS": {
-        const deck = canonicalDeck(playerCount, s.deckCount);
+        const deck = canonicalDeck(playerCount, s.deckCount, s.handSize);
         const C = s.calledCount;
         const cards: Card[] = [];
         while (cards.length < C) {
@@ -122,8 +122,12 @@ describe("property suite — randomized full games", () => {
         fc.array(fc.integer({ min: 0, max: 1_000_000 }), { minLength: 40, maxLength: 200 }),
         (playerCount, deckPick, rngSeq) => {
           const deckCount = playerCount >= 6 ? deckPick : 1; // 2-deck only for 6–7 players (§16)
+          // v2.1: random legal hand size (min..max for this table) exercises the trim path
+          const minH = Math.min(deckCount === 2 ? 10 : 8, Math.floor((52 * deckCount) / playerCount));
+          const maxH = Math.floor((52 * deckCount) / playerCount);
+          const handSize = minH + (rngSeq[0]! % (maxH - minH + 1));
           const N = 2; // short games keep runs fast
-          const { finals, states } = driveGame(playerCount, N, rngSeq, deckCount);
+          const { finals, states } = driveGame(playerCount, N, rngSeq, deckCount, handSize);
 
           // termination + round count
           expect(finals.phase).toBe("GAME_END");
@@ -162,8 +166,8 @@ describe("property suite — randomized full games", () => {
         fc.integer({ min: 4, max: 7 }),
         fc.array(fc.integer({ min: 0, max: 1_000_000 }), { minLength: 40, maxLength: 120 }),
         (playerCount, rngSeq) => {
-          const a = driveGame(playerCount, 2, rngSeq, playerCount >= 6 ? 2 : 1);
-          const b = driveGame(playerCount, 2, rngSeq, playerCount >= 6 ? 2 : 1);
+          const a = driveGame(playerCount, 2, rngSeq, playerCount >= 6 ? 2 : 1, playerCount >= 6 ? 11 : undefined);
+          const b = driveGame(playerCount, 2, rngSeq, playerCount >= 6 ? 2 : 1, playerCount >= 6 ? 11 : undefined);
           expect(JSON.stringify(a.finals)).toBe(JSON.stringify(b.finals));
         },
       ),

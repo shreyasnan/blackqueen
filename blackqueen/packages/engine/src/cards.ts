@@ -28,35 +28,47 @@ export function pointValue(c: Card): number {
 export const TOTAL_POINTS = 150; // per deck, §3/§5
 export const totalPoints = (deckCount: number): number => TOTAL_POINTS * deckCount;
 
-/** §3 deterministic trim: lowest ranks first, ONE COPY per suit per pass, ♣→♦→♥→♠;
- *  repeat passes over a rank while copies remain (2-deck), then next rank, until divisible. */
-export function trimmedDeckSize(playerCount: number, deckCount = 1): number {
-  let size = 52 * deckCount;
-  while (size % playerCount !== 0) size--;
-  return size;
+/** §3.2 (v2.1) hand-size bounds. Max = every card dealt (the pre-v2.1 fixed table);
+ *  min = 8 (1 deck) / 10 (2 decks), clamped so min ≤ max at small tables. */
+export const maxHandSize = (playerCount: number, deckCount = 1): number =>
+  Math.floor((52 * deckCount) / playerCount);
+export const minHandSize = (playerCount: number, deckCount = 1): number =>
+  Math.min(deckCount === 2 ? 10 : 8, maxHandSize(playerCount, deckCount));
+/** Default: 1 deck deals everything (pre-v2.1 behavior); 2 decks default to 12 (ideal band). */
+export const defaultHandSize = (playerCount: number, deckCount = 1): number =>
+  deckCount === 2 ? Math.min(12, maxHandSize(playerCount, deckCount)) : maxHandSize(playerCount, deckCount);
+
+/** §3 (v2.1): deck size is exactly playerCount × handSize. */
+export function trimmedDeckSize(playerCount: number, deckCount = 1, handSize?: number): number {
+  return playerCount * (handSize ?? defaultHandSize(playerCount, deckCount));
 }
 
-/** Removed card COPIES (an identity may appear twice in 2-deck trims, e.g. both 2♣ at 7p). */
-export function removedCards(playerCount: number, deckCount = 1): Card[] {
-  const toRemove = 52 * deckCount - trimmedDeckSize(playerCount, deckCount);
+/** §3 deterministic trim: lowest ranks first, ONE COPY per suit per pass, ♣→♦→♥→♠;
+ *  repeat passes over a rank while copies remain (2-deck), then next rank.
+ *  v2.1: point cards (5s, 10s, As, Q♠) are SKIPPED, never trimmed — total stays 150×deckCount.
+ *  Removed card COPIES (an identity may appear twice in 2-deck trims, e.g. both 2♣ at 7p). */
+export function removedCards(playerCount: number, deckCount = 1, handSize?: number): Card[] {
+  const toRemove = 52 * deckCount - trimmedDeckSize(playerCount, deckCount, handSize);
+  if (toRemove < 0) throw new Error("handSize exceeds deck (§3.2)");
   const out: Card[] = [];
   outer: for (const rank of RANKS) {
     for (let copy = 0; copy < deckCount; copy++) { // §3: per-copy passes within a rank
       for (const suit of SUITS) {
         if (out.length >= toRemove) break outer;
-        if (pointValue({ suit, rank }) > 0) throw new Error("trim reached a point card"); // §3 invariant guard
+        if (pointValue({ suit, rank }) > 0) continue; // §3 invariant: point cards never trimmed
         out.push({ suit, rank });
       }
     }
   }
+  if (out.length < toRemove) throw new Error("trim exhausted non-point cards (§3.2 bound violated)");
   return out;
 }
 
 /** §3.1 step 1: canonical order — suit ♣<♦<♥<♠, rank ascending, copy index ascending
  *  (copies consecutive) — over the trimmed set. Locked by KAT-001 (1 deck) / KAT-002 (2 decks). */
-export function canonicalDeck(playerCount: number, deckCount = 1): Card[] {
+export function canonicalDeck(playerCount: number, deckCount = 1, handSize?: number): Card[] {
   const removedCount = new Map<string, number>();
-  for (const c of removedCards(playerCount, deckCount)) {
+  for (const c of removedCards(playerCount, deckCount, handSize)) {
     removedCount.set(cardKey(c), (removedCount.get(cardKey(c)) ?? 0) + 1);
   }
   const deck: Card[] = [];

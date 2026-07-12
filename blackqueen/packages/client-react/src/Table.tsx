@@ -110,10 +110,23 @@ export function Table() {
 
 /** The declarer's moment, all in one place: "You win the bid" → choose trump → pick partner card(s).
  *  Replaces the crown-overlay-then-tiny-controls flow and the typed card input. */
-const TRIMMED: Record<number, string[]> = { 4: [], 5: ["2C", "2D"], 6: ["2C", "2D", "2H", "2S"], 7: ["2C", "2D", "2H"] }; // §3 single-deck (public)
-/** Fully-dead identities (§3): in 2-deck games an identity is dead only if BOTH copies were trimmed. */
-const deadIdentities = (playerCount: number, deckCount: number): string[] =>
-  deckCount === 2 ? (playerCount === 7 ? ["2C", "2D"] : []) : TRIMMED[playerCount] ?? [];
+/** Fully-dead identities (§3, v2.1): mirrors the engine trim — lowest ranks first, per-copy passes
+ *  (♣→♦→♥→♠), point cards skipped. An identity is dead only if EVERY copy was trimmed. */
+const RANKS_ASC = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+const SUITS_CDHS = ["C", "D", "H", "S"];
+const isPointCard = (rank: string, suit: string) => rank === "A" || rank === "10" || rank === "5" || (rank === "Q" && suit === "S");
+const deadIdentities = (playerCount: number, deckCount: number, handSize?: number | null): string[] => {
+  const h = handSize ?? Math.floor((52 * deckCount) / playerCount);
+  let toRemove = 52 * deckCount - playerCount * h;
+  const removed = new Map<string, number>();
+  outer: for (const rank of RANKS_ASC) for (let copy = 0; copy < deckCount; copy++) for (const suit of SUITS_CDHS) {
+    if (toRemove <= 0) break outer;
+    if (isPointCard(rank, suit)) continue;
+    removed.set(rank + suit, (removed.get(rank + suit) ?? 0) + 1);
+    toRemove--;
+  }
+  return [...removed.entries()].filter(([, n]) => n >= deckCount).map(([k]) => k);
+};
 const RANKS_DESC: Card["rank"][] = ["A", "K", "Q", "J", "10", "9", "8", "7", "6", "5", "4", "3", "2"];
 
 function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
@@ -126,7 +139,7 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
   if (!open) return null;
 
   const C = v.calledCount ?? (v.playerCount <= 5 ? 1 : 2);
-  const trimmed = new Set(deadIdentities(v.playerCount, v.deckCount ?? 1));
+  const trimmed = new Set(deadIdentities(v.playerCount, v.deckCount ?? 1, (v as any).handSize));
   const inHand = (c: Card) => v.ownHand.some((h) => h.rank === c.rank && h.suit === c.suit);
   const isPicked = (c: Card) => picked.some((p) => p.rank === c.rank && p.suit === c.suit);
   const toggle = (c: Card) => {

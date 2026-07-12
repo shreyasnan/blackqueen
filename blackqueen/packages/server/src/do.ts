@@ -97,7 +97,8 @@ export class RoomDO implements DurableObject {
           phase: this.core.phase, members: this.core.members, host: this.core.hostAccountId,
           code: this.core.phase === "OPEN" ? this.core.inviteCode : null,
           seatNames: this.core.seatNames, mySeat: this.core.seatOf.get(accountId) ?? null,
-          deckCount: this.core.config.deckCount, calledCount: this.core.config.calledCount ?? null, N: this.core.config.N,
+          deckCount: this.core.config.deckCount, calledCount: this.core.config.calledCount ?? null,
+          handSize: this.core.config.handSize ?? null, N: this.core.config.N,
         });
       case "/ws": {
         if (req.headers.get("Upgrade") !== "websocket") return new Response("expected websocket", { status: 426 });

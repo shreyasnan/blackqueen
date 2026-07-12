@@ -5,7 +5,7 @@ import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-20-two-decks"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-21-hand-size"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -133,6 +133,7 @@ function Home({ auth }: { auth: AuthState }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [deckCount, setDeckCount] = useState<1 | 2>(1);
   const [calledCount, setCalledCount] = useState(2);
+  const [handSize, setHandSize] = useState<number | "all">("all"); // v2.1: "all" = deal the whole trimmed deck
   const identity = () => {
     const n = nick.trim().slice(0, 20) || auth.name;
     saveProfile(face, n);
@@ -177,8 +178,8 @@ function Home({ auth }: { auth: AuthState }) {
       <div style={{ background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 12, padding: 12, marginBottom: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, color: "var(--ink-soft)", marginBottom: 8 }}>TABLE RULES</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button onClick={() => setDeckCount(1)} style={{ ...(deckCount === 1 ? btn : btnSec), padding: "8px 14px" }}>1 deck · 150 pts</button>
-          <button onClick={() => setDeckCount(2)} style={{ ...(deckCount === 2 ? btn : btnSec), padding: "8px 14px" }}>2 decks · 300 pts</button>
+          <button onClick={() => { setDeckCount(1); setHandSize("all"); }} style={{ ...(deckCount === 1 ? btn : btnSec), padding: "8px 14px" }}>1 deck · 150 pts</button>
+          <button onClick={() => { setDeckCount(2); setHandSize(12); }} style={{ ...(deckCount === 2 ? btn : btnSec), padding: "8px 14px" }}>2 decks · 300 pts</button>
           {deckCount === 2 && (
             <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
               partner cards:
@@ -188,6 +189,21 @@ function Home({ auth }: { auth: AuthState }) {
               ))}
             </span>
           )}
+        </div>
+        {/* v2.1: creator-selectable hand size — extra cards are trimmed (low junk first, never point cards) */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 13, marginTop: 8 }}>
+          cards per hand:
+          {(deckCount === 2 ? [10, 11, 12, 13, 14] : [8, 9, 10]).map((n) => (
+            <button key={n} onClick={() => setHandSize(n)}
+              style={{ ...(handSize === n ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>{n}</button>
+          ))}
+          <button onClick={() => setHandSize("all")}
+            style={{ ...(handSize === "all" ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>whole deck</button>
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
+          {handSize !== "all"
+            ? <>extra cards are trimmed before the deal — lowest ranks first, <b>never point cards</b> (5s, 10s, Aces, Q♠), so the total stays {deckCount === 2 ? 300 : 150}. If the table can't fit {handSize}, the nearest legal size is used.</>
+            : <>every card is dealt — hand size depends on the player count.</>}
         </div>
         {deckCount === 2 && (
           <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
@@ -201,7 +217,13 @@ function Home({ auth }: { auth: AuthState }) {
         <button style={{ ...btn, padding: "14px" }} onClick={async () => {
           try {
             const me = identity();
-            const r = await api<{ roomId: string; code: string }>("/api/rooms", { N: 8, deckCount, ...(deckCount === 2 ? { calledCount } : {}), ...me });
+            const r = await api<{ roomId: string; code: string }>("/api/rooms", {
+              N: 8, deckCount,
+              ...(deckCount === 2 ? { calledCount } : {}),
+              // "whole deck" = engine default for 1 deck; for 2 decks send 17 (server clamps to the table max)
+              ...(handSize !== "all" ? { handSize } : deckCount === 2 ? { handSize: 17 } : {}),
+              ...me,
+            });
             setRoomInfo({ roomId: r.roomId, code: r.code, members: [{ accountId: auth.accountId, displayName: me.displayName, avatar: me.avatar }], host: auth.accountId });
             setScreen("lobby");
           } catch (e) { pushToast(String(e)); }
@@ -233,7 +255,7 @@ function Lobby({ auth }: { auth: AuthState }) {
       try {
         const s = await api<any>(`/api/rooms/${roomInfo.roomId}/state`);
         if (s.phase !== "OPEN") { clearInterval(t); connect(roomInfo.roomId); return; }
-        setRoomInfo({ ...roomInfo, members: s.members, host: s.host, code: s.code, deckCount: s.deckCount, calledCount: s.calledCount } as any);
+        setRoomInfo({ ...roomInfo, members: s.members, host: s.host, code: s.code, deckCount: s.deckCount, calledCount: s.calledCount, handSize: s.handSize } as any);
       } catch { /* transient */ }
     }, 2000);
     return () => clearInterval(t);
@@ -271,6 +293,7 @@ function Lobby({ auth }: { auth: AuthState }) {
       <p style={{ color: "var(--ink-soft)", marginBottom: 10 }}>
         {roomInfo.members.length} / {(roomInfo as any).deckCount === 2 ? "6–7" : "4–7"} players
         {(roomInfo as any).deckCount === 2 && <b style={{ color: "var(--gold)" }}> · 2 decks · 300 pts · {(roomInfo as any).calledCount ?? 2} partner card{((roomInfo as any).calledCount ?? 2) > 1 ? "s" : ""}</b>}
+        {(roomInfo as any).handSize != null && <> · <b>{(roomInfo as any).handSize} cards each</b> (clamped to the table if needed)</>}
       </p>
       {isHost && (
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>

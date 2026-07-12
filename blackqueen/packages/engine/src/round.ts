@@ -2,7 +2,7 @@
 // applyAction(state, action) -> { state, events, versionBump } | { reject }
 // Zero I/O: seeds, abandoned-seat info, and timeouts arrive AS actions from the shell (RoomDO).
 
-import { Card, Suit, SUITS, cardEq, cardKey, calledCardCount, canonicalDeck } from "./cards.js";
+import { Card, Suit, SUITS, cardEq, cardKey, calledCardCount, canonicalDeck, defaultHandSize, minHandSize, maxHandSize } from "./cards.js";
 import { deal } from "./deal.js";
 import { BiddingState, applyBid, applyPass, initBidding } from "./bidding.js";
 import { autoPlayCard, isLegalPlay, legalPlays, trickWinner, trickPoints, TrickPlay } from "./tricks.js";
@@ -40,6 +40,7 @@ export interface GameState {
   playerCount: number;
   N: number;
   deckCount: number; // 1 | 2 (§3/§16); 2 only for 6–7 players
+  handSize: number; // cards per player (§3.2/§16, v2.1); deck trimmed to playerCount × handSize
   calledCount: number; // C (§9.2/§16)
   totalPoints: number; // 150 × deckCount (§5)
   roundNumber: number; // 1-based; 0 = not started
@@ -85,11 +86,15 @@ export type ApplyResult =
   | { ok: true; state: GameState; events: Event[]; versionBump: boolean }
   | { ok: false; reject: "ILLEGAL" | "NOT_YOUR_TURN" | "WRONG_PHASE" };
 
-export function initGame(playerCount: number, N: number, round1DefaultDeclarerSeat: number, deckCount = 1, calledCountOverride?: number): GameState {
+export function initGame(playerCount: number, N: number, round1DefaultDeclarerSeat: number, deckCount = 1, calledCountOverride?: number, handSizeOverride?: number): GameState {
   if (playerCount < 4 || playerCount > 7) throw new Error("4–7 players only (§2)");
   if (deckCount !== 1 && deckCount !== 2) throw new Error("deckCount must be 1 or 2 (§16)");
   if (deckCount === 2 && playerCount < 6) throw new Error("2-deck games require 6–7 players (§3/§16)");
   if (!Number.isInteger(N) || N < 1 || N > 10 * playerCount) throw new Error("N out of bounds (§16)");
+  const handSize = handSizeOverride ?? defaultHandSize(playerCount, deckCount);
+  if (!Number.isInteger(handSize) || handSize < minHandSize(playerCount, deckCount) || handSize > maxHandSize(playerCount, deckCount)) {
+    throw new Error(`handSize must be ${minHandSize(playerCount, deckCount)}–${maxHandSize(playerCount, deckCount)} for ${playerCount}p/${deckCount}-deck (§3.2/§16)`);
+  }
   const calledCount = deckCount === 2
     ? (calledCountOverride ?? 2)
     : calledCardCount(playerCount); // single-deck: fixed table, override ignored (§9.2)
@@ -98,7 +103,7 @@ export function initGame(playerCount: number, N: number, round1DefaultDeclarerSe
   }
   return {
     playerCount, N,
-    deckCount, calledCount, totalPoints: 150 * deckCount,
+    deckCount, handSize, calledCount, totalPoints: 150 * deckCount,
     roundNumber: 0,
     totalScore: Array(playerCount).fill(0),
     phase: "ROUND_END" as Phase, // pre-game: awaiting first START_ROUND
@@ -149,7 +154,7 @@ function startRound(state: GameState, action: { seed: Uint8Array; abandonedSeats
   }
   if (skipped.length > 0) events.push({ kind: "ROTATION_SKIPPED", skippedSeats: skipped, newDefaultDeclarerSeat: seat });
 
-  const hands = deal(state.playerCount, seat, action.seed, state.deckCount);
+  const hands = deal(state.playerCount, seat, action.seed, state.deckCount, state.handSize);
   const bidding = initBidding(state.playerCount, seat, state.totalPoints / 2);
   const round: RoundData = {
     defaultDeclarerSeat: seat,
@@ -236,7 +241,7 @@ function callCards(state: GameState, seat: number, cards: Card[]): ApplyResult {
   if (seat !== r.declarerSeat) return reject("NOT_YOUR_TURN");
   const C = state.calledCount;
   if (cards.length !== C) return reject("ILLEGAL");
-  const inPlay = new Set(canonicalDeck(state.playerCount, state.deckCount).map(cardKey));
+  const inPlay = new Set(canonicalDeck(state.playerCount, state.deckCount, state.handSize).map(cardKey));
   if (!cards.every((c) => inPlay.has(cardKey(c)))) return reject("ILLEGAL"); // identity must have a copy in play (§9.2)
   const keys = cards.map(cardKey);
   if (new Set(keys).size !== keys.length) return reject("ILLEGAL"); // pairwise-distinct identities

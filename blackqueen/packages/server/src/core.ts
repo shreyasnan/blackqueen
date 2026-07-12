@@ -4,7 +4,7 @@
 
 import {
   initGame, applyAction, playerView, GameState, Action, Event as EngineEvent, Suit, Card,
-  autoPlayCard, canonicalDeck, cardEq, SUITS, calledCardCount, rankIndex,
+  autoPlayCard, canonicalDeck, cardEq, SUITS, calledCardCount, rankIndex, minHandSize, maxHandSize,
 } from "@blackqueen/engine";
 
 export type RoomPhase = "OPEN" | "IN_GAME" | "ENDED";
@@ -36,6 +36,7 @@ export interface RoomConfig {
   graceMs: number;
   deckCount: number; // 1 | 2 (GAME_SPEC §16); 2 only for 6–7 players
   calledCount?: number; // 2-deck only: creator-selected C (1–3, default 2)
+  handSize?: number; // v2.1 (§3.2/§16): cards per player; clamped at start to the legal range for the actual player count
 }
 
 export interface Outbound {
@@ -164,7 +165,7 @@ export class RoomCore {
         // classic: call the highest in-play cards of the trump suit not held; extend to other suits if needed
         const trump = r.stagedTrump!;
         const C = g.calledCount;
-        const inPlay = canonicalDeck(g.playerCount, g.deckCount);
+        const inPlay = canonicalDeck(g.playerCount, g.deckCount, g.handSize);
         const notHeld = (c: Card) => !hand.some((h) => cardEq(h, c));
         const bySuit = (s: Suit) => inPlay.filter((c) => c.suit === s && notHeld(c)).sort((a, b) => rankIndex(b.rank) - rankIndex(a.rank));
         const pool = [...bySuit(trump), ...SUITS.filter((s) => s !== trump).flatMap(bySuit)];
@@ -232,6 +233,13 @@ export class RoomCore {
         (!Number.isInteger(this.config.calledCount) || this.config.calledCount < 1 || this.config.calledCount > 3)) {
       return { ok: false, error: "calledCount must be 1-3" };
     }
+    // v2.1 hand size: creator picks before the table fills, so CLAMP to the legal
+    // range for the actual player count rather than reject (§3.2; lobby shows the effective value).
+    let handSize: number | undefined = this.config.handSize;
+    if (handSize !== undefined) {
+      if (!Number.isInteger(handSize)) return { ok: false, error: "handSize must be an integer" };
+      handSize = Math.max(minHandSize(n, this.config.deckCount), Math.min(maxHandSize(n, this.config.deckCount), handSize));
+    }
 
     // Seat assignment (§3.4 / GAME_SPEC §2): random CSPRNG permutation or host-arranged
     let order: string[];
@@ -252,7 +260,7 @@ export class RoomCore {
     order.forEach((id, seat) => this.seatOf.set(id, seat));
 
     const round1Seat = this.uniform(n - 1); // round1DefaultDeclarerSelection: random (§16)
-    this.game = initGame(n, this.config.N, round1Seat, this.config.deckCount, this.config.calledCount);
+    this.game = initGame(n, this.config.N, round1Seat, this.config.deckCount, this.config.calledCount, handSize);
     this.phase = "IN_GAME";
     this.wasConnectedThisRound = Array(n).fill(true);
     this.broadcastEvent("SEATING", { seats: this.seatNames, avatars: this.seatAvatars, hostSeat: this.seatOf.get(this.hostAccountId) });

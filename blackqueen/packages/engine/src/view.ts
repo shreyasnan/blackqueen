@@ -13,6 +13,7 @@ export interface ClientView {
   playerCount: number;
   N: number;
   deckCount: number; // 1 | 2 (§16) — public
+  handSize: number; // cards per player (§3.2/§16, v2.1) — public
   totalPoints: number; // 150 × deckCount (§5) — public
   calledCount: number; // C (§9.2/§16) — public
   roundNumber: number;
@@ -60,6 +61,7 @@ export function playerView(state: GameState, viewerSeat: number): ClientView {
     playerCount: state.playerCount,
     N: state.N,
     deckCount: state.deckCount,
+    handSize: state.handSize,
     totalPoints: state.totalPoints,
     calledCount: state.calledCount,
     roundNumber: state.roundNumber,

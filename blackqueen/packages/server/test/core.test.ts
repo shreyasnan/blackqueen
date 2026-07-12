@@ -81,6 +81,23 @@ describe("lobby (PLAT-002 spirit)", () => {
     [B, C, D].forEach((x) => r4.join(r4.inviteCode, x, x));
     expect(r4.startGame(A).ok).toBe(false); // combined budget < 10s rejected
   });
+  it("v2.1 handSize: clamped to the actual table's legal range at start", () => {
+    const r5 = new RoomCore("r5", new TestOut());
+    r5.create(A, "Alice", { handSize: 17 }); // 1-deck, 4p → max 13
+    [B, C, D].forEach((x) => r5.join(r5.inviteCode, x, x));
+    expect(r5.startGame(A).ok).toBe(true);
+    expect(r5.game!.handSize).toBe(13); // clamped down to whole deck
+    const r6 = new RoomCore("r6", new TestOut());
+    r6.create(A, "Alice", { handSize: 10 });
+    [B, C, D].forEach((x) => r6.join(r6.inviteCode, x, x));
+    expect(r6.startGame(A).ok).toBe(true);
+    expect(r6.game!.handSize).toBe(10);
+    expect(r6.game!.round!.hands.every((h) => h.length === 10)).toBe(true);
+    const r7 = new RoomCore("r7", new TestOut());
+    r7.create(A, "Alice", { handSize: 7.5 });
+    [B, C, D].forEach((x) => r7.join(r7.inviteCode, x, x));
+    expect(r7.startGame(A).ok).toBe(false); // non-integer rejected
+  });
 });
 
 describe("apply loop — idempotency, stale guard, private rejects", () => {

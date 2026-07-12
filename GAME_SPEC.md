@@ -1,7 +1,7 @@
 # Black Queen — Game Specification
 
-**Version:** 2.0 (two-deck mode — approved product enhancement)
-**Status:** v2.0 adds an optional **second deck** (6–7 players only): 300 points, standing bid 150, **first-played wins ties** (§4/§10), and the **claim model** for partners — the first player to *play* a copy of a called card becomes the partner (§9.3), which generalizes v1 behavior identically for single-deck games. Creator may also select the called-card count in 2-deck games (§16). Full details: changelog (§17).
+**Version:** 2.1 (creator-selectable hand size)
+**Status:** v2.1 adds **`handSize`** (§3.2/§16): the creator may choose how many cards each player is dealt; the deck is trimmed to exactly `playerCount × handSize` using the §3 removal rule generalized past rank 2 (point cards are never trimmed, so the §5 total is preserved). Defaults: single-deck deals the whole trimmed deck (identical to v2.0); two-deck defaults to **12** (the 10–12 ideal band). v2.0 added an optional **second deck** (6–7 players only): 300 points, standing bid 150, **first-played wins ties** (§4/§10), and the **claim model** for partners — the first player to *play* a copy of a called card becomes the partner (§9.3), which generalizes v1 behavior identically for single-deck games. Creator may also select the called-card count in 2-deck games (§16). Full details: changelog (§17).
 
 **Contents:** [Overview](#1-overview) · [Players](#2-players) · [Deck](#3-deck-composition) · [Ranking](#4-card-ranking) · [Points](#5-point-cards) · [Round structure](#6-round-structure-overview) · [Default declarer](#7-default-declarer-selection) · [Bidding](#8-bidding) · [Trump & partners](#9-trump-selection--calling-partners) · [Trick play](#10-trick-play) · [Round result](#11-determining-the-round-result) · [Scoring](#12-scoring) · [Game end](#13-game-end) · [Data model](#14-developer-data-model-reference) · [Edge cases](#15-edge-cases--clarifications) · [Config](#16-configurable-values-set-at-game-start--implementation-defaults) · [Changelog](#17-changelog)
 
@@ -32,7 +32,7 @@ A game is created with **`deckCount` = 1 or 2** (§16). One deck is a standard 5
 
 To deal an even hand to every player, remove only **low, non-point cards** (2s, then 3s, then 4s). Point cards (Aces, 10s, 5s, Q♠) are **never** removed, so the point total (§5) is always preserved.
 
-**Removal rule (deterministic):** remove the lowest ranks first, **one copy per suit per pass**, taking suits in the fixed priority order **♣ → ♦ → ♥ → ♠**; when a rank still has remaining copies (2-deck games), repeat the pass over the same rank before moving to the next rank. Continue until the deck size is divisible by the number of players.
+**Removal rule (deterministic):** remove the lowest ranks first, **one copy per suit per pass**, taking suits in the fixed priority order **♣ → ♦ → ♥ → ♠**; when a rank still has remaining copies (2-deck games), repeat the pass over the same rank before moving to the next rank. **Point cards (5s, 10s, Aces, Q♠) are skipped, never removed** — the pass continues to the next non-point card. Continue until the deck size equals `playerCount × handSize` (§3.2). With the default hand size this reproduces the tables below exactly.
 
 **Single deck (52 cards):**
 
@@ -52,7 +52,19 @@ To deal an even hand to every player, remove only **low, non-point cards** (2s, 
 
 (7-player derivation: pass 1 removes one copy each of 2♣ 2♦ 2♥ 2♠; the rank still has copies, so pass 2 continues in suit order with the second 2♣ and second 2♦ — 6 removed, 98 = 14 × 7.) Note that in 2-deck games a "removed" card identity may still be **in play via its other copy**; only 2♣ and 2♦ at 7 players are fully dead identities.
 
+The tables above show the **maximum** hand size (whole trimmed deck). §3.2 lets the creator deal fewer.
+
 There is **no kitty / no undealt cards**. Every card in the trimmed deck is dealt to a player.
+
+### 3.2 Hand size (v2.1)
+
+The creator may select **`handSize`** — the number of cards dealt to each player. The deck is trimmed to exactly `playerCount × handSize` cards by the §3 removal rule (lowest ranks first, per-copy passes, ♣→♦→♥→♠, point cards skipped).
+
+- **Range:** minimum **8** (single deck) / **10** (two decks); maximum = whole-deck value from the §3 tables. Where the table maximum is below the minimum (e.g. 7 players single-deck: 7 cards), the maximum is the only legal value.
+- **Defaults:** single-deck = maximum (identical to pre-v2.1 behavior); two-deck = **12** (ideal play sits at 10–12 cards).
+- **Clamping (normative):** the creator picks `handSize` before the table fills, so at `LOBBY` start the value is **clamped** to the legal range for the actual player count (never silently rejected); the lobby MUST display the effective value. Non-integer values are rejected.
+- The trimmed card **set** remains deterministic and public: every player can compute exactly which copies are out of play from `(playerCount, deckCount, handSize)`. Fully-dead identities (all copies trimmed) remain invalid call targets (§9.2).
+- The §5 invariant is unchanged: point cards are never trimmed, so every round is worth `150 × deckCount`.
 
 > **Invariant:** all point cards of every deck are always in play → **`150 × deckCount`** points every round (150 single-deck; 300 two-deck).
 
@@ -503,12 +515,13 @@ that returns only the information the viewer is permitted to see per the rules a
 These are intentionally left as configuration, not rules:
 
 1. **`deckCount`** — **1 or 2** (default 1), fixed at creation. **2 is valid only for 6–7 players** (rejected at `LOBBY` otherwise, §3). Sets `totalPoints = 150 × deckCount`, the standing bid (`totalPoints/2`), the bid cap (`totalPoints`), the trim table (§3), and enables the claim-timing dynamics of §9.3.
-2. **`calledCount`** — the called-card count `C`. **Single-deck: not configurable** (fixed table, §9.2). **Two-deck: creator-selected 1–3, default 2**; selecting 3 MUST surface a swinginess note (team totals reach ±4Y). Validated at `LOBBY`.
-3. **`round1DefaultDeclarerSelection`** — how the round-1 default declarer is picked. Default: **random**. (Alternative: fixed seat.) Clockwise rotation thereafter is fixed (§7). **This is NOT the shuffle seed** — the shuffle seed is server-generated per round, never host-configurable, never exposed during play (§3.1).
-4. **Number of rounds `N`** — default **`2 × playerCount`**; SHOULD be a multiple of `playerCount`; custom values allowed with a mandatory uneven-rotation warning (§13). **Validation (normative): `N` must be an integer with `1 ≤ N ≤ 10 × playerCount`; any other value is rejected at `LOBBY`.** (`N = 0` would produce a degenerate instant `GAME_END` in which every player "shares victory" at 0.)
-5. **Turn timer** — per-turn time limit and grace period driving the timeout default actions (auto-pass §8.6 / auto-play §10 / `PAUSED` §9.4). Duration is configurable; the *default actions themselves are normative*, not configurable. **Validation (normative): the combined budget `turnTimerMs + graceMs` must be ≥ 10 000 ms**, and `reconnectGraceMs` must satisfy `1 000 ms ≤ reconnectGraceMs ≤ turnTimerMs + graceMs`; violating configs are rejected at `LOBBY` (a near-zero budget turns every declarer decision into an instant `PAUSED` and every turn into an auto-action). The combined budget is the **single** escalation clock — disconnects never start a competing timer (`ARCHITECTURE.md` §7). Timer mechanism: `ARCHITECTURE.md`.
-6. **`seatAssignment`** — how players map to seats at game start (§2). Default: **random** (server-side, audited CSPRNG per `ARCHITECTURE.md` §5). Alternative: **host-arranged** (explicit, lobby-visible ordering). Join order is never used implicitly.
-7. **Uneven-rotation warning visibility** — when `N mod playerCount ≠ 0`, the §13 warning **MUST be shown to every player** (e.g. in the lobby before ready-up), not only to the host who chose `N` — otherwise the person configuring the asymmetry is the only one warned about it.
+2. **`handSize`** — cards dealt per player (§3.2). Default: whole deck (1-deck) / **12** (2-deck). Range 8/10 up to the whole-deck maximum; clamped at `LOBBY` to the actual table's legal range; effective value lobby-visible.
+3. **`calledCount`** — the called-card count `C`. **Single-deck: not configurable** (fixed table, §9.2). **Two-deck: creator-selected 1–3, default 2**; selecting 3 MUST surface a swinginess note (team totals reach ±4Y). Validated at `LOBBY`.
+4. **`round1DefaultDeclarerSelection`** — how the round-1 default declarer is picked. Default: **random**. (Alternative: fixed seat.) Clockwise rotation thereafter is fixed (§7). **This is NOT the shuffle seed** — the shuffle seed is server-generated per round, never host-configurable, never exposed during play (§3.1).
+5. **Number of rounds `N`** — default **`2 × playerCount`**; SHOULD be a multiple of `playerCount`; custom values allowed with a mandatory uneven-rotation warning (§13). **Validation (normative): `N` must be an integer with `1 ≤ N ≤ 10 × playerCount`; any other value is rejected at `LOBBY`.** (`N = 0` would produce a degenerate instant `GAME_END` in which every player "shares victory" at 0.)
+6. **Turn timer** — per-turn time limit and grace period driving the timeout default actions (auto-pass §8.6 / auto-play §10 / `PAUSED` §9.4). Duration is configurable; the *default actions themselves are normative*, not configurable. **Validation (normative): the combined budget `turnTimerMs + graceMs` must be ≥ 10 000 ms**, and `reconnectGraceMs` must satisfy `1 000 ms ≤ reconnectGraceMs ≤ turnTimerMs + graceMs`; violating configs are rejected at `LOBBY` (a near-zero budget turns every declarer decision into an instant `PAUSED` and every turn into an auto-action). The combined budget is the **single** escalation clock — disconnects never start a competing timer (`ARCHITECTURE.md` §7). Timer mechanism: `ARCHITECTURE.md`.
+7. **`seatAssignment`** — how players map to seats at game start (§2). Default: **random** (server-side, audited CSPRNG per `ARCHITECTURE.md` §5). Alternative: **host-arranged** (explicit, lobby-visible ordering). Join order is never used implicitly.
+8. **Uneven-rotation warning visibility** — when `N mod playerCount ≠ 0`, the §13 warning **MUST be shown to every player** (e.g. in the lobby before ready-up), not only to the host who chose `N` — otherwise the person configuring the asymmetry is the only one warned about it.
 
 **Removed / out of scope in v1:** secondary tie-breakers (ties are shared victories only, §13 — **decided v1.9: no tie-breaker will be added for casual play**; revisit only for ranked modes); post-game extension (`GAME_END` is terminal); spectator views (§14.2).
 
@@ -520,6 +533,7 @@ Remaining deferred decisions (kamikaze mitigation trigger) are tracked in `OPEN_
 
 ## 17. Changelog
 
+- **v2.1** — Creator-selectable **hand size** (§3.2/§16): deck trimmed to `playerCount × handSize` by the generalized §3 removal rule (point cards skipped, never removed — §5 total preserved). Range 8 (1-deck) / 10 (2-deck) up to the whole-deck maximum; defaults: whole deck (1-deck), 12 (2-deck). Clamped at `LOBBY` to the actual table's range; effective value lobby-visible. Locked by CONFIG-005 (`TEST_CASES.md` §12); KAT-002 pinned to `handSize = 17`.
 - **v2.0** — **Two-deck mode** (product enhancement; 1-deck games unchanged in behavior):
   - **`deckCount` 1|2 at creation (§16);** 2 decks valid only for 6–7 players (§2/§3). `totalPoints = 150 × deckCount`; standing bid `totalPoints/2` (150 in 2-deck), cap `totalPoints` (300) — §5/§8 generalized (75/150 are now the 1-deck instances of the formulas).
   - **Trim tables ×2 (§3):** 6p removes one 2♣ + one 2♦ (102/17 each); 7p removes both 2♣, both 2♦, one 2♥, one 2♠ (98/14 each); trim rule gains a per-copy pass clause. Canonical order gains a copy-index tertiary key; **KAT-002** locks the 2-deck deal.
