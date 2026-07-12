@@ -165,10 +165,25 @@ export class RoomCore {
         // classic: call the highest in-play cards of the trump suit not held; extend to other suits if needed
         const trump = r.stagedTrump!;
         const C = g.calledCount;
-        const inPlay = canonicalDeck(g.playerCount, g.deckCount, g.handSize);
+        // DISTINCT identities only — 2-deck canonicalDeck lists both copies consecutively, and
+        // CALL_CARDS rejects duplicate identities. Calling A♠ twice wedged the bot in an
+        // 800ms reject-retry loop ("bot gets stuck"): dedupe BEFORE slicing.
+        const seen = new Set<string>();
+        const inPlay = canonicalDeck(g.playerCount, g.deckCount, g.handSize).filter((c) => {
+          const k = `${c.rank}${c.suit}`;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
         const notHeld = (c: Card) => !hand.some((h) => cardEq(h, c));
         const bySuit = (s: Suit) => inPlay.filter((c) => c.suit === s && notHeld(c)).sort((a, b) => rankIndex(b.rank) - rankIndex(a.rank));
+        // 2-deck: "not held" is no longer required (the other copy is claimable) — but preferring
+        // unheld cards keeps the classic feel; fall back to held identities if the pool runs short.
         const pool = [...bySuit(trump), ...SUITS.filter((s) => s !== trump).flatMap(bySuit)];
+        if (pool.length < C) {
+          const held = inPlay.filter((c) => !pool.some((p) => cardEq(p, c)));
+          pool.push(...held);
+        }
         return { type: "CALL_CARDS", seat, cards: pool.slice(0, C) };
       }
       case "TRICK_PLAY": {
@@ -200,8 +215,15 @@ export class RoomCore {
   botActOnce(): boolean {
     const seat = this.awaitedSeat();
     if (seat === null || !this.isBotSeat(seat) || !this.game) return false;
-    const res = applyAction(this.game, this.botDecide(seat));
-    if (!res.ok) return false; // defensive: a bot must never wedge the room
+    let res = applyAction(this.game, this.botDecide(seat));
+    if (!res.ok) {
+      // Defensive (v2.2): a rejected bot decision must NEVER wedge the room in a reject-retry
+      // loop. Fall back to the normative timeout default (auto-pass / auto-play / PAUSED),
+      // which is always legal, and record the anomaly for post-game audit.
+      this.out.audit({ roomId: this.roomId, anomaly: "bot_decision_rejected", seat, phase: this.game.phase });
+      res = applyAction(this.game, { type: "TIMEOUT" });
+      if (!res.ok) return false;
+    }
     this.game = res.state;
     if (res.versionBump) this.afterAccepted(res.events);
     else this.persistSnapshot(); // bot's staged CHOOSE_TRUMP: silent, snapshotted (§9.2)

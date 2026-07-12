@@ -235,6 +235,38 @@ describe("practice bots", () => {
     for (const vu of botViews) expect(vu.view.viewerSeat).toBe(r.seatOf.get(botAcct));
   });
 
+  it("BOT-STUCK regression: 2-deck bot declarer calls DISTINCT identities and never wedges", () => {
+    // Repro: 5 bots + 1 human, 2 decks. When a bot wins the standing bid it must call C
+    // distinct identities (the old pool held both copies of A-trump -> duplicate -> reject loop).
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const bout = new TestOut();
+      const r = new RoomCore("wedge" + attempt, bout);
+      r.create(A, "Alice", { N: 1, deckCount: 2, handSize: 10 });
+      for (let i = 0; i < 5; i++) expect(r.addBot(A).ok).toBe(true);
+      expect(r.startGame(A).ok).toBe(true);
+      let id = 0;
+      const say = (type: any, payload: any) =>
+        r.handleAction(A, `00000000-0000-4000-8000-cc${String(++id).padStart(10, "0")}`, r.stateVersion, { type, payload });
+      let guard = 0;
+      while (r.phase === "IN_GAME" && guard++ < 900) {
+        const before = r.stateVersion;
+        r.botTurnLoop();
+        if (r.phase !== "IN_GAME") break;
+        const g = r.game!;
+        const mySeat = r.seatOf.get(A)!;
+        if (g.phase === "BIDDING" && g.round!.turnSeat === mySeat) say("PASS", {});
+        else if (g.phase === "TRICK_PLAY" && g.round!.turnSeat === mySeat) r.onTimeout();
+        else if (g.phase === "ROUND_END") say("HOST_NEXT_ROUND", {});
+        else if (g.phase === "TRUMP_SELECTION" && g.round!.declarerSeat === mySeat) say("CHOOSE_TRUMP", { suit: "S" });
+        else if (g.phase === "CALLING_PARTNERS" && g.round!.declarerSeat === mySeat) say("CALL_CARDS", { cards: [{ suit: "S", rank: "A" }, { suit: "H", rank: "A" }] });
+        else if (r.stateVersion === before) throw new Error(`WEDGED in ${g.phase} at v${r.stateVersion}`);
+      }
+      expect(r.phase).toBe("ENDED");
+      // and the wedge fallback never had to fire:
+      expect(bout.audits?.some?.((a: any) => a.anomaly === "bot_decision_rejected") ?? false).toBe(false);
+    }
+  });
+
   it("removeBot pops the last bot; bots can't be added mid-game", () => {
     const bout = new TestOut();
     const r = new RoomCore("botroom2", bout);

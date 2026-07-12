@@ -12,18 +12,62 @@ export function toggleMute(): boolean {
 
 let master: GainNode | null = null;
 
-function ac(): AudioContext | null {
-  if (muted) return null;
+const AC: typeof AudioContext | undefined =
+  typeof window !== "undefined" ? (window.AudioContext ?? (window as any).webkitAudioContext) : undefined;
+
+function ensureCtx(): AudioContext | null {
   try {
-    if (!ctx) {
-      ctx = new AudioContext();
+    if (!ctx && AC) {
+      ctx = new AC();
       master = ctx.createGain();
       master.gain.value = 0.8; // headroom: layered one-shots never clip
       master.connect(ctx.destination);
     }
-    if (ctx.state === "suspended") void ctx.resume();
     return ctx;
   } catch { return null; }
+}
+
+function ac(): AudioContext | null {
+  if (muted) return null;
+  const c = ensureCtx();
+  if (!c) return null;
+  if (c.state === "suspended") void c.resume();
+  return c.state === "running" ? c : c; // sounds scheduled while resuming still land once running
+}
+
+/** MOBILE UNLOCK (iOS/Android): WebAudio starts "suspended" and may only be resumed INSIDE a
+ *  user gesture. Most of our sounds fire from server events — never a gesture — so on phones
+ *  the context stayed suspended forever (= total silence). Unlock on the first real touch:
+ *  create + resume the context and play a one-sample silent buffer (the iOS ritual).
+ *  Also re-resume after backgrounding (iOS suspends the context when the tab sleeps). */
+function unlock(): void {
+  const c = ensureCtx();
+  if (!c) return;
+  void c.resume().then(() => {
+    try { // silent kick: some iOS versions only truly unlock after a source starts in-gesture
+      const buf = c.createBuffer(1, 1, 22050);
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      src.connect(c.destination);
+      src.start(0);
+    } catch { /* already unlocked */ }
+  });
+}
+if (typeof window !== "undefined") {
+  const tryUnlock = () => {
+    unlock();
+    if (ctx?.state === "running") { // done — stop listening
+      window.removeEventListener("touchend", tryUnlock);
+      window.removeEventListener("pointerdown", tryUnlock);
+      window.removeEventListener("keydown", tryUnlock);
+    }
+  };
+  window.addEventListener("touchend", tryUnlock, { passive: true });
+  window.addEventListener("pointerdown", tryUnlock, { passive: true });
+  window.addEventListener("keydown", tryUnlock);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && ctx?.state === "suspended") void ctx.resume();
+  });
 }
 
 const out = (c: AudioContext) => master ?? c.destination;
