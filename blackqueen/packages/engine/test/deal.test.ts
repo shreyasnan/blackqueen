@@ -1,6 +1,6 @@
 // KAT-001 + CONFIG-001 (TEST_CASES.md §7)
 import { describe, expect, it } from "vitest";
-import { deal, canonicalDeck, removedCards, trimmedDeckSize, calledCardCount, pointValue, cardKey } from "../src/index.js";
+import { deal, canonicalDeck, removedCards, trimmedDeckSize, calledCardCount, pointValue, cardKey, initGame } from "../src/index.js";
 
 const seed = new Uint8Array(Array.from({ length: 32 }, (_, i) => i));
 
@@ -54,4 +54,60 @@ describe("CONFIG-001 — deck & shares per player count", () => {
       expect(hands.every((h) => h.length === row.per)).toBe(true);
     });
   }
+});
+
+// ---------------- v2.0: two-deck mode ----------------
+
+describe("CONFIG-004 — 2-deck trim, points, bounds (TEST_CASES §11)", () => {
+  it("6p: 102 cards / 17 each; removes one 2♣ + one 2♦", () => {
+    expect(trimmedDeckSize(6, 2)).toBe(102);
+    expect(removedCards(6, 2).map(cardKey).sort()).toEqual(["2C", "2D"]);
+    expect(canonicalDeck(6, 2).length).toBe(102);
+  });
+  it("7p: 98 cards / 14 each; removes both 2♣, both 2♦, one 2♥, one 2♠", () => {
+    expect(trimmedDeckSize(7, 2)).toBe(98);
+    expect(removedCards(7, 2).map(cardKey).sort()).toEqual(["2C", "2C", "2D", "2D", "2H", "2S"]);
+  });
+  it("300 points, two Queens, both worth 30", () => {
+    const deck = canonicalDeck(6, 2);
+    expect(deck.reduce((s, c) => s + pointValue(c), 0)).toBe(300);
+    expect(deck.filter((c) => c.rank === "Q" && c.suit === "S").length).toBe(2);
+  });
+  it("2-deck rejected below 6 players; calledCount bounds enforced", () => {
+    expect(() => initGame(5, 10, 0, 2)).toThrow();
+    expect(() => initGame(6, 12, 0, 2, 0)).toThrow();
+    expect(() => initGame(6, 12, 0, 2, 4)).toThrow();
+    expect(initGame(6, 12, 0, 2, 3).calledCount).toBe(3);
+    expect(initGame(6, 12, 0, 2).calledCount).toBe(2); // default
+    expect(initGame(4, 8, 0, 1, 3).calledCount).toBe(1); // single-deck: fixed table, override ignored
+  });
+});
+
+describe("KAT-002 — 2-deck known-answer deal vector (REQUIRED conformance)", () => {
+  // Inputs: playerCount=6, defaultDeclarerSeat=0, deckCount=2, seed bytes 00..1f.
+  // Frozen from the reference implementation (TEST_CASES §11).
+  const KAT2: string[][] = [
+    "AC 3D 9S 10C 8C 7C 7S 6D 3D 5H 8S 7D 7H AD 9C 9H 9D",
+    "10S QS JD 9D 8S 5S 6C 7C 10H 2H 3H 10D JC 6S QD 5D 7H",
+    "6D KC 8D JD 5H 9S 6S KH 10S AH 10H AD JH JS 4C JS QH",
+    "QH 7D 2S KS JH QD QS 5C 4S KC AS 4D 3H 8H 3C KS 8D",
+    "4H 8H 4H 3S 6H 2D KD 4C 4D 5C JC 9C 6H 4S 6C KD 2H",
+    "10D 2C 7S AH 9H 10C 2S 3C 8C 3S 5D KH QC AC AS 5S QC",
+  ].map((s) => s.split(" "));
+  it("reproduces the exact 2-deck hands, in deal order", () => {
+    const hands = deal(6, 0, seed, 2);
+    expect(hands.map((h) => h.map(cardKey))).toEqual(KAT2);
+  });
+  it("union is the trimmed 102-card multiset; 300 points", () => {
+    const all = deal(6, 0, seed, 2).flat();
+    expect(all.length).toBe(102);
+    expect(all.reduce((s, c) => s + pointValue(c), 0)).toBe(300);
+    // exactly deckCount copies of every non-trimmed identity
+    const counts = new Map<string, number>();
+    for (const c of all) counts.set(cardKey(c), (counts.get(cardKey(c)) ?? 0) + 1);
+    expect(counts.get("QS")).toBe(2);
+    expect(counts.get("2C")).toBe(1); // one copy trimmed at 6p
+    expect(counts.get("2D")).toBe(1);
+    expect(counts.get("2H")).toBe(2);
+  });
 });

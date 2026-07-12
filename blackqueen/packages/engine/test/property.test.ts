@@ -9,10 +9,10 @@ import {
 } from "../src/index.js";
 
 /** Deterministic pseudo-driver: plays a full game making rng-driven legal choices. */
-function driveGame(playerCount: number, N: number, rngSeq: number[]): { finals: GameState; log: Action[]; states: GameState[] } {
+function driveGame(playerCount: number, N: number, rngSeq: number[], deckCount = 1): { finals: GameState; log: Action[]; states: GameState[] } {
   let rp = 0;
   const rnd = (n: number) => rngSeq[rp++ % rngSeq.length]! % n;
-  let s = initGame(playerCount, N, rnd(playerCount));
+  let s = initGame(playerCount, N, rnd(playerCount), deckCount);
   const log: Action[] = [];
   const states: GameState[] = [s];
   const apply = (a: Action) => {
@@ -34,8 +34,9 @@ function driveGame(playerCount: number, N: number, rngSeq: number[]): { finals: 
       case "BIDDING": {
         const seat = s.round!.turnSeat!;
         const hi = s.round!.bidding.currentHighBid;
-        if (hi < 150 && rnd(4) === 0) {
-          const maxSteps = (150 - hi) / 5;
+        const cap = s.totalPoints;
+        if (hi < cap && rnd(4) === 0) {
+          const maxSteps = (cap - hi) / 5;
           apply({ type: "BID", seat, value: hi + 5 * (1 + rnd(maxSteps)) });
         } else {
           apply({ type: "PASS", seat });
@@ -46,8 +47,8 @@ function driveGame(playerCount: number, N: number, rngSeq: number[]): { finals: 
         apply({ type: "CHOOSE_TRUMP", seat: s.round!.declarerSeat, suit: SUITS[rnd(4)]! });
         break;
       case "CALLING_PARTNERS": {
-        const deck = canonicalDeck(playerCount);
-        const C = calledCardCount(playerCount);
+        const deck = canonicalDeck(playerCount, s.deckCount);
+        const C = s.calledCount;
         const cards: Card[] = [];
         while (cards.length < C) {
           const c = deck[rnd(deck.length)]!;
@@ -96,14 +97,12 @@ function assertNoLeak(state: GameState, viewerSeat: number): void {
     Object.values(rec).forEach(walk);
   };
   walk(v);
-  // Membership visibility must be exactly justified: a seat may appear in the viewer's
-  // revealedTeamMembers iff it is the declarer, has played a called card, or is the viewer themselves.
+  // CLAIM model (§9.3): membership is exactly the public claim record — a seat may appear in
+  // revealedTeamMembers iff it is the declarer or has CLAIMED a called card. Nothing else, for anyone.
   const r = state.round;
   if (r) {
     const justified = (seat: number): boolean =>
-      seat === r.declarerSeat ||
-      seat === viewerSeat ||
-      r.calledCardHolders.some((h, i) => h === seat && r.playedCalledCards.includes(cardKey(r.calledCards[i]!)));
+      seat === r.declarerSeat || r.claimedBy.includes(seat);
     for (const seat of v.revealedTeamMembers) {
       if (!justified(seat)) throw new Error(`unjustified membership ${seat} leaked to seat ${viewerSeat}`);
     }
@@ -119,21 +118,23 @@ describe("property suite — randomized full games", () => {
     fc.assert(
       fc.property(
         fc.integer({ min: 4, max: 7 }),
+        fc.integer({ min: 1, max: 2 }),
         fc.array(fc.integer({ min: 0, max: 1_000_000 }), { minLength: 40, maxLength: 200 }),
-        (playerCount, rngSeq) => {
-          const N = playerCount; // one rotation keeps runs fast
-          const { finals, states } = driveGame(playerCount, N, rngSeq);
+        (playerCount, deckPick, rngSeq) => {
+          const deckCount = playerCount >= 6 ? deckPick : 1; // 2-deck only for 6–7 players (§16)
+          const N = 2; // short games keep runs fast
+          const { finals, states } = driveGame(playerCount, N, rngSeq, deckCount);
 
           // termination + round count
           expect(finals.phase).toBe("GAME_END");
-          expect(finals.roundNumber).toBe(N);
+          expect(finals.roundNumber).toBe(2);
 
           for (const s of states) {
             // captured points never exceed 150; at ROUND_END they sum to exactly 150
             if (s.round) {
               const sum = s.round.capturedPoints.reduce((a, b) => a + b, 0);
-              expect(sum).toBeLessThanOrEqual(TOTAL_POINTS);
-              if (s.phase === "ROUND_END" || (s.phase === "GAME_END" && s.round)) expect(sum).toBe(TOTAL_POINTS);
+              expect(sum).toBeLessThanOrEqual(s.totalPoints);
+              if (s.phase === "ROUND_END" || (s.phase === "GAME_END" && s.round)) expect(sum).toBe(s.totalPoints);
               // on-turn player always has a legal action in trick play
               if (s.phase === "TRICK_PLAY") {
                 const led = s.round.currentTrick.length === 0 ? null : s.round.currentTrick[0]!.card.suit;
@@ -161,8 +162,8 @@ describe("property suite — randomized full games", () => {
         fc.integer({ min: 4, max: 7 }),
         fc.array(fc.integer({ min: 0, max: 1_000_000 }), { minLength: 40, maxLength: 120 }),
         (playerCount, rngSeq) => {
-          const a = driveGame(playerCount, playerCount, rngSeq);
-          const b = driveGame(playerCount, playerCount, rngSeq);
+          const a = driveGame(playerCount, 2, rngSeq, playerCount >= 6 ? 2 : 1);
+          const b = driveGame(playerCount, 2, rngSeq, playerCount >= 6 ? 2 : 1);
           expect(JSON.stringify(a.finals)).toBe(JSON.stringify(b.finals));
         },
       ),

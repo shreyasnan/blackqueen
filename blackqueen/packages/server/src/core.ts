@@ -34,6 +34,8 @@ export interface RoomConfig {
   seatAssignment: "random" | "host-arranged";
   turnTimerMs: number;
   graceMs: number;
+  deckCount: number; // 1 | 2 (GAME_SPEC §16); 2 only for 6–7 players
+  calledCount?: number; // 2-deck only: creator-selected C (1–3, default 2)
 }
 
 export interface Outbound {
@@ -68,7 +70,7 @@ export class RoomCore {
   members: Member[] = [];
   hostAccountId = "";
   inviteCode = "";
-  config: RoomConfig = { N: 8, seatAssignment: "random", turnTimerMs: 30000, graceMs: 15000 };
+  config: RoomConfig = { N: 8, seatAssignment: "random", turnTimerMs: 30000, graceMs: 15000, deckCount: 1 };
   seatOf = new Map<string, number>(); // accountId -> seat (immutable once IN_GAME, §3.4)
   accountOfSeat: string[] = [];
   seatNames: string[] = [];
@@ -161,8 +163,8 @@ export class RoomCore {
       case "CALLING_PARTNERS": {
         // classic: call the highest in-play cards of the trump suit not held; extend to other suits if needed
         const trump = r.stagedTrump!;
-        const C = calledCardCount(g.playerCount);
-        const inPlay = canonicalDeck(g.playerCount);
+        const C = g.calledCount;
+        const inPlay = canonicalDeck(g.playerCount, g.deckCount);
         const notHeld = (c: Card) => !hand.some((h) => cardEq(h, c));
         const bySuit = (s: Suit) => inPlay.filter((c) => c.suit === s && notHeld(c)).sort((a, b) => rankIndex(b.rank) - rankIndex(a.rank));
         const pool = [...bySuit(trump), ...SUITS.filter((s) => s !== trump).flatMap(bySuit)];
@@ -224,6 +226,12 @@ export class RoomCore {
     if (n < MIN_MEMBERS || n > MAX_MEMBERS) return { ok: false, error: "need 4-7 players" };
     if (!Number.isInteger(this.config.N) || this.config.N < 1 || this.config.N > 10 * n) return { ok: false, error: "N out of bounds" };
     if (this.config.turnTimerMs + this.config.graceMs < 10000) return { ok: false, error: "timer too small" };
+    if (this.config.deckCount !== 1 && this.config.deckCount !== 2) return { ok: false, error: "deckCount must be 1 or 2" };
+    if (this.config.deckCount === 2 && n < 6) return { ok: false, error: "2-deck games need 6-7 players" };
+    if (this.config.deckCount === 2 && this.config.calledCount !== undefined &&
+        (!Number.isInteger(this.config.calledCount) || this.config.calledCount < 1 || this.config.calledCount > 3)) {
+      return { ok: false, error: "calledCount must be 1-3" };
+    }
 
     // Seat assignment (§3.4 / GAME_SPEC §2): random CSPRNG permutation or host-arranged
     let order: string[];
@@ -244,7 +252,7 @@ export class RoomCore {
     order.forEach((id, seat) => this.seatOf.set(id, seat));
 
     const round1Seat = this.uniform(n - 1); // round1DefaultDeclarerSelection: random (§16)
-    this.game = initGame(n, this.config.N, round1Seat);
+    this.game = initGame(n, this.config.N, round1Seat, this.config.deckCount, this.config.calledCount);
     this.phase = "IN_GAME";
     this.wasConnectedThisRound = Array(n).fill(true);
     this.broadcastEvent("SEATING", { seats: this.seatNames, avatars: this.seatAvatars, hostSeat: this.seatOf.get(this.hostAccountId) });

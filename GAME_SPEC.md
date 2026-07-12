@@ -1,7 +1,7 @@
 # Black Queen — Game Specification
 
-**Version:** 1.9.1 (implementation-ready — approved for build; 1.9.1 adds the previously unspecified `seatAssignment` policy, §2/§16)
-**Status:** All product decisions resolved; approved for build. The v1.9 decision pass closed the stall-escape exploit, added the abandoned-seat rotation skip, and settled table-talk, timeout, and tie policies — full details in the changelog (§17) and `OPEN_RISKS.md`.
+**Version:** 2.0 (two-deck mode — approved product enhancement)
+**Status:** v2.0 adds an optional **second deck** (6–7 players only): 300 points, standing bid 150, **first-played wins ties** (§4/§10), and the **claim model** for partners — the first player to *play* a copy of a called card becomes the partner (§9.3), which generalizes v1 behavior identically for single-deck games. Creator may also select the called-card count in 2-deck games (§16). Full details: changelog (§17).
 
 **Contents:** [Overview](#1-overview) · [Players](#2-players) · [Deck](#3-deck-composition) · [Ranking](#4-card-ranking) · [Points](#5-point-cards) · [Round structure](#6-round-structure-overview) · [Default declarer](#7-default-declarer-selection) · [Bidding](#8-bidding) · [Trump & partners](#9-trump-selection--calling-partners) · [Trick play](#10-trick-play) · [Round result](#11-determining-the-round-result) · [Scoring](#12-scoring) · [Game end](#13-game-end) · [Data model](#14-developer-data-model-reference) · [Edge cases](#15-edge-cases--clarifications) · [Config](#16-configurable-values-set-at-game-start--implementation-defaults) · [Changelog](#17-changelog)
 
@@ -28,9 +28,13 @@ The declarer's team wins the round if it captures at least the bid value in card
 
 ## 3. Deck Composition
 
-The base deck is a standard 52-card deck. To deal an even hand to every player, remove only **low, non-point cards** (2s, then 3s, then 4s). Point cards (Aces, 10s, 5s, Q♠) are **never** removed, so the 150-point total is always preserved.
+A game is created with **`deckCount` = 1 or 2** (§16). One deck is a standard 52-card deck; two decks are **two identical** 52-card decks shuffled together (every card exists in exactly two copies). **Two-deck games are permitted only for 6–7 players** (§2/§16); 4–5 player games are always single-deck.
 
-**Removal rule (deterministic):** remove the lowest ranks first, one card per suit, taking suits in the fixed priority order **♣ → ♦ → ♥ → ♠**. Continue until the deck size is divisible by the number of players.
+To deal an even hand to every player, remove only **low, non-point cards** (2s, then 3s, then 4s). Point cards (Aces, 10s, 5s, Q♠) are **never** removed, so the point total (§5) is always preserved.
+
+**Removal rule (deterministic):** remove the lowest ranks first, **one copy per suit per pass**, taking suits in the fixed priority order **♣ → ♦ → ♥ → ♠**; when a rank still has remaining copies (2-deck games), repeat the pass over the same rank before moving to the next rank. Continue until the deck size is divisible by the number of players.
+
+**Single deck (52 cards):**
 
 | Players | Cards removed | Removed cards | Deck size | Cards per player |
 |--------:|--------------:|---------------|----------:|-----------------:|
@@ -39,15 +43,24 @@ The base deck is a standard 52-card deck. To deal an even hand to every player, 
 | 6 | 4 | 2♣, 2♦, 2♥, 2♠ | 48 | 8 |
 | 7 | 3 | 2♣, 2♦, 2♥ | 49 | 7 |
 
+**Two decks (104 cards, 6–7 players only):**
+
+| Players | Cards removed | Removed cards | Deck size | Cards per player |
+|--------:|--------------:|---------------|----------:|-----------------:|
+| 6 | 2 | 2♣ ×1, 2♦ ×1 | 102 | 17 |
+| 7 | 6 | 2♣ ×2, 2♦ ×2, 2♥ ×1, 2♠ ×1 | 98 | 14 |
+
+(7-player derivation: pass 1 removes one copy each of 2♣ 2♦ 2♥ 2♠; the rank still has copies, so pass 2 continues in suit order with the second 2♣ and second 2♦ — 6 removed, 98 = 14 × 7.) Note that in 2-deck games a "removed" card identity may still be **in play via its other copy**; only 2♣ and 2♦ at 7 players are fully dead identities.
+
 There is **no kitty / no undealt cards**. Every card in the trimmed deck is dealt to a player.
 
-> **Invariant:** All 13 point cards (4 Aces, 4 Tens, 4 Fives, Q♠) are always in play → 150 points every round.
+> **Invariant:** all point cards of every deck are always in play → **`150 × deckCount`** points every round (150 single-deck; 300 two-deck).
 
 ### 3.1 Dealing
 
 The deal is **fully reproducible from the tuple `(playerCount, seatingOrder, defaultDeclarerSeat, shuffleSeed)`** — the deal depends on the default declarer seat (round-robin starts there) and on the fixed player↔seat mapping, not on `shuffleSeed` alone. The pipeline below is normative; any conforming implementation produces identical hands from identical inputs (enabling audit and cross-implementation replay). The exact PRNG construction (ChaCha20 keying, byte draw, endianness, Fisher–Yates direction, rejection sampling) is pinned in `ARCHITECTURE.md` §5 and locked by the known-answer vector in `TEST_CASES.md` §7.
 
-1. **Canonical deck order.** Start from the trimmed card set (§3) sorted into a canonical index order: primary key **suit** in the order `♣ < ♦ < ♥ < ♠`, secondary key **rank** ascending `2 < 3 < … < 10 < J < Q < K < A`. This yields a deterministic array `deck[0 … deckSize−1]`.
+1. **Canonical deck order.** Start from the trimmed card set (§3) sorted into a canonical index order: primary key **suit** in the order `♣ < ♦ < ♥ < ♠`, secondary key **rank** ascending `2 < 3 < … < 10 < J < Q < K < A`, tertiary key **copy index** ascending (2-deck games: the two copies of a card are consecutive). This yields a deterministic array `deck[0 … deckSize−1]`. Copies are physically indistinguishable in play; the copy index exists only to make the shuffle input deterministic (locked by KAT-001 for one deck and **KAT-002** for two, `TEST_CASES.md`).
 2. **Shuffle seed.** Per round, the **server** generates a `shuffleSeed` (see `ARCHITECTURE.md` for generation and retention). The seed is **never chosen by, nor visible to, any participant (including the host) during play** — it is not the round-1 declarer selection value of §16, and it is not exposed until game end at the earliest. It is retained server-side with shuffle metadata for debugging/audit.
 3. **Deterministic shuffle.** Apply an in-place **Fisher–Yates** shuffle to `deck`, drawing indices from a **named, seeded, portable PRNG** (the reference algorithm is **ChaCha20**; see `ARCHITECTURE.md`). Same seed + same `deckSize` ⇒ same permutation on every platform.
 4. **Normative dealing procedure — round-robin, clockwise, starting at the default declarer.** Deal one card at a time from the front of the shuffled `deck`: the first card to the **default declarer's seat**, the next clockwise, and so on, cycling `deckSize / playerCount` times until the deck is empty. (The dealing procedure is fixed and normative — the resulting hands depend on it, so it is not left to implementer choice.)
@@ -68,20 +81,23 @@ A > K > Q > J > 10 > 9 > 8 > 7 > 6 > 5 > 4 > 3 > 2
 - A trump card beats any non-trump card.
 - Among trump cards, normal rank order applies.
 - Rank is only used to compare cards **of the same suit** (or among trumps); see §10 for trick resolution.
+- **Identical-card ties (2-deck games, normative): the FIRST-played copy wins.** When two copies of the same card are candidates in one trick (same suit and rank), the copy played **earlier in the trick** outranks the one played later. Equivalently: a card only beats the current best candidate by being **strictly higher**. This is the standard double-deck convention; it rewards leading and early position.
 
 ---
 
 ## 5. Point Cards
 
-| Card | Value each | Count | Subtotal |
-|------|-----------:|------:|---------:|
-| Ace | 15 | 4 | 60 |
-| Ten | 10 | 4 | 40 |
-| Five | 5 | 4 | 20 |
-| Queen of Spades (Q♠) | 30 | 1 | 30 |
-| **Total** | | **13** | **150** |
+Per deck (multiply counts by `deckCount`):
 
-All other cards are worth 0 points. Q♠ is worth 30 whether or not Spades is the trump suit.
+| Card | Value each | Count ×1 deck | Subtotal ×1 | Count ×2 decks | Subtotal ×2 |
+|------|-----------:|------:|---------:|------:|---------:|
+| Ace | 15 | 4 | 60 | 8 | 120 |
+| Ten | 10 | 4 | 40 | 8 | 80 |
+| Five | 5 | 4 | 20 | 8 | 40 |
+| Queen of Spades (Q♠) | 30 | 1 | 30 | 2 | 60 |
+| **Total** | | **13** | **150** | **26** | **300** |
+
+All other cards are worth 0 points. **Each** Q♠ is worth 30 whether or not Spades is the trump suit; in 2-deck games both Queens carry full value independently. Define **`totalPoints = 150 × deckCount`** — used throughout for the standing bid, bid cap, and contract math.
 
 ---
 
@@ -116,20 +132,20 @@ A game is a fixed number of rounds `N` (§13).
 Bidding determines the final declarer and the contract value `Y`.
 
 ### 8.1 Standing bid
-- The default declarer begins as the **current high bidder** with a **binding** standing bid of **75**. If the auction ends with no higher bid, the default declarer is the final declarer at `Y = 75`.
+- The default declarer begins as the **current high bidder** with a **binding** standing bid of **`totalPoints / 2`** — **75** single-deck, **150** two-deck. If the auction ends with no higher bid, the default declarer is the final declarer at that value.
 - Because a binding bid always exists, an **all-pass outcome is impossible**.
 
 ### 8.2 Legal actions
 On the turn of the player `p` who is *on turn*, exactly one action is legal:
-- **Bid `v`**, where `v` is a multiple of 5, `v > currentHighBid`, and `v ≤ 150`; **or**
+- **Bid `v`**, where `v` is a multiple of 5, `v > currentHighBid`, and `v ≤ totalPoints` (150 single-deck, 300 two-deck); **or**
 - **Pass** — permitted **only if `p` is not the current high bidder**.
 
 A player who is the current high bidder is **never placed on turn** (see 8.4), so "pass while high bidder" can never arise. Passing is **permanent**: a passed player takes no further part in this round's auction. A player never bids against themselves.
 
 **Turn-scheduler invariant (normative).** The turn scheduler **MUST NEVER assign a turn to the current high bidder.** The only player who may be placed on turn is a **non-passed player who is not the current high bidder**. This invariant, together with 8.4, guarantees the auction cannot stall, cannot assign an illegal turn, and cannot reach a state where the on-turn player has no legal action:
-- **Exactly one legal actor at every step.** Whenever the auction has not ended, there is at least one non-passed player who is not the high bidder (proof below), and the scheduler places exactly that next such player (clockwise) on turn. That player always has a legal action — at minimum **Pass** (legal because they are not the high bidder), and possibly a **Bid** if `currentHighBid < 150`.
-- **Liveness / no deadlock.** Let `k` = number of non-passed players. The high bidder is always one non-passed player, so the pool of *eligible actors* is exactly `k − 1`. Each **Pass** strictly decreases `k` by 1; a **Bid** strictly increases `currentHighBid` by ≥ 5 (bounded above by 150) and hands the high-bidder role to the bidder. Because both the number of non-passed players and the headroom `150 − currentHighBid` are finite and every action decreases one of them, the auction **always terminates**.
-- **Termination is caught deterministically:** when `k − 1 = 0` (only the high bidder remains non-passed) the auction ends by 8.4(2); a bid of 150 ends it by 8.4(1). At termination no player is on turn, so no illegal or empty turn is ever produced.
+- **Exactly one legal actor at every step.** Whenever the auction has not ended, there is at least one non-passed player who is not the high bidder (proof below), and the scheduler places exactly that next such player (clockwise) on turn. That player always has a legal action — at minimum **Pass** (legal because they are not the high bidder), and possibly a **Bid** if `currentHighBid < totalPoints`.
+- **Liveness / no deadlock.** Let `k` = number of non-passed players. The high bidder is always one non-passed player, so the pool of *eligible actors* is exactly `k − 1`. Each **Pass** strictly decreases `k` by 1; a **Bid** strictly increases `currentHighBid` by ≥ 5 (bounded above by `totalPoints`) and hands the high-bidder role to the bidder. Because both the number of non-passed players and the headroom `totalPoints − currentHighBid` are finite and every action decreases one of them, the auction **always terminates**.
+- **Termination is caught deterministically:** when `k − 1 = 0` (only the high bidder remains non-passed) the auction ends by 8.4(2); a bid of `totalPoints` ends it by 8.4(1). At termination no player is on turn, so no illegal or empty turn is ever produced.
 
 ### 8.3 Turn order
 - The first player on turn is the player **immediately clockwise from the default declarer**.
@@ -144,14 +160,14 @@ A player who is the current high bidder is **never placed on turn** (see 8.4), s
 
 ### 8.4 Ending the auction
 The engine evaluates these after every action, in order:
-1. If a player bids **150**, the auction ends immediately; that player is the final declarer with `Y = 150`.
+1. If a player bids **`totalPoints`** (150 single-deck, 300 two-deck), the auction ends immediately; that player is the final declarer with `Y = totalPoints`.
 2. Otherwise, after each **pass**, if exactly **one non-passed player remains**, the auction ends; that player is the final declarer and their current high bid is `Y`. They are **not** placed on turn again.
 3. Otherwise, advance to the next non-passed player clockwise.
 
 The final declarer may or may not be the original default declarer.
 
 ### 8.5 Invalid actions
-Any action outside the legal set of 8.2 (wrong player, non-multiple-of-5, not strictly higher, `> 150`, or a pass by the high bidder) is **rejected deterministically** and the same player is re-prompted. A rejected action changes no game state. (Rejections are delivered privately to the acting client and rate-limited — see `MESSAGE_PROTOCOL.md`.)
+Any action outside the legal set of 8.2 (wrong player, non-multiple-of-5, not strictly higher, `> totalPoints`, or a pass by the high bidder) is **rejected deterministically** and the same player is re-prompted. A rejected action changes no game state. (Rejections are delivered privately to the acting client and rate-limited — see `MESSAGE_PROTOCOL.md`.)
 
 ### 8.6 Timeout default action (gameplay effect)
 If the on-turn bidder fails to act within the configured turn timer (mechanism in `ARCHITECTURE.md`), the engine **auto-passes** on their behalf. This is always safe and legal: by the §8.3.1 invariant the on-turn player is never the current high bidder, so **Pass** is always a legal action for them. Auto-pass is permanent like any pass and cannot strand the auction.
@@ -166,37 +182,39 @@ Performed by the final declarer, **in this order**:
 The declarer names one of the four suits as **trump** for the round. The choice is **final once accepted**: a second `CHOOSE_TRUMP` after acceptance (i.e. while in `CALLING_PARTNERS`) is rejected as `ILLEGAL` like any out-of-state action (§8.5 semantics); the declarer cannot revise trump after seeing nothing new anyway — no information arrives between the two decisions.
 
 ### 9.2 Calling partner card(s) (second)
-The declarer then names the **called card(s)**. The number depends on player count:
+The declarer then names the **called card(s)**. In **single-deck** games the count `C` is fixed by player count; in **two-deck** games `C` is a **game-creation option** chosen by the creator (§16), default 2:
 
-| Players | Called cards `C` | Scoring shares `S = C + 1` |
-|--------:|-----------------:|---------------------------:|
-| 4 | 1 | 2 |
-| 5 | 1 | 2 |
-| 6 | 2 | 3 |
-| 7 | 2 | 3 |
+| Game | Called cards `C` | Scoring shares `S = C + 1` |
+|------|-----------------:|---------------------------:|
+| 1 deck, 4–5 players | 1 (fixed) | 2 |
+| 1 deck, 6–7 players | 2 (fixed) | 3 |
+| 2 decks, 6–7 players | **creator-selected 1–3** (default 2) | 2–4 |
 
-The declarer **announces the trump suit and the called-card identities publicly.** Every player immediately learns the trump suit and exactly which card(s) were called. **Only the mapping of called cards to their holders is hidden.** (Although §14.1 lists `TRUMP_SELECTION` and `CALLING_PARTNERS` as separate states, both are performed by the same actor with no other player acting between them; the trump choice and the called cards are broadcast together, on transition out of `CALLING_PARTNERS`, so no partial information leaks in between.)
+(`C = 3` in 2-deck games makes team totals swing by up to `±4Y` — the lobby MUST surface a swinginess note when selected, §16.)
+
+The declarer **announces the trump suit and the called-card identities publicly.** Every player immediately learns the trump suit and exactly which card(s) were called. What stays hidden is **who will claim each called card** — in single-deck games that is its (unique) holder; in two-deck games it is undetermined until a copy is played (§9.3). (Although §14.1 lists `TRUMP_SELECTION` and `CALLING_PARTNERS` as separate states, both are performed by the same actor with no other player acting between them; the trump choice and the called cards are broadcast together, on transition out of `CALLING_PARTNERS`, so no partial information leaks in between.)
 
 **Disclosure gating (normative, closes a phase side channel):** until the `CALL_CARDS` action is accepted, the trump suit is visible **only to the declarer's own view**; every other player's `ClientView.trump` is null. Furthermore, the two internal states `TRUMP_SELECTION` and `CALLING_PARTNERS` are exposed to non-declarer clients as a **single indistinguishable phase** (wire value `DECLARER_SETUP`, see `MESSAGE_PROTOCOL.md` §3): non-declarer clients MUST NOT be able to observe the internal `TRUMP_SELECTION → CALLING_PARTNERS` transition, whether via a phase field, a `stateVersion` bump visible to them, an event, or `PAUSED` metadata (a pause during either sub-state is reported to non-declarer clients only as "paused during declarer setup"). Otherwise the transition itself would leak how long the declarer deliberated over trump vs. calls — the exact information the broadcast-together rule exists to hide.
 
 **Mechanism (normative):** an accepted `CHOOSE_TRUMP` is **staged** server-side — it advances the internal sub-state but does **not** bump the room `stateVersion` and emits nothing to any client (the declarer's own client echoes the staged choice locally). The staged trump and the called cards are then applied and versioned as a **single transition** when `CALL_CARDS` is accepted. Consequently the version/event stream observable by any client is bit-identical whether or not trump has been chosen yet — so neither a `stateVersion` jump nor a `PAUSED` entered mid-setup can disclose which sub-state the room was in. (The staged choice is included in the crash-recovery snapshot; `ARCHITECTURE.md` §2/§8.)
 
 **Legality of called cards (validated, else declarer re-prompted):**
-- A called card **must be a card that is in play** (i.e. not one of the trimmed-out cards). This guarantees every called card is held by exactly one player, so no partner slot is ever "dead."
-- The declarer **may call a card they hold themselves**. In that case the declarer owns that card's scoring share in addition to the declarer share (see §12). Calling one's own card(s) to play a partnerless **"secret solo"** (±2Y in 4–5p, ±3Y in 6–7p) is an **intended, legal, high-variance strategy** — not an exploit.
-- When `C = 2`, the two called cards must be **distinct**.
+- A called card **must be an identity with at least one copy in play** (i.e. not fully removed by the trim — in 2-deck games an identity is dead only if *both* copies were trimmed, §3). This guarantees every called card will be claimed by exactly one player before round end, so no partner slot is ever "dead."
+- The declarer **may call a card they hold themselves**. If the declarer claims it (plays the first copy), they own that card's scoring share in addition to the declarer share (see §12) — the **"secret solo"** path (`±S×Y` alone), an **intended, legal, high-variance strategy**. In 2-deck games holding a copy does not guarantee the claim: another player's copy may land first.
+- When `C ≥ 2`, the called cards must be **pairwise distinct identities** (calling "both copies of A♠" is not a thing — a call names an identity, and its first-played copy claims).
 - Trump selection is validated as one of the four suits.
 Any violation is rejected deterministically and the declarer re-prompted; no state changes.
 
-### 9.3 Team formation & reveal
-- A player who holds a called card is a **member of the declarer's team**. All other players are **defenders**.
-- **The declarer is always a team member and their membership is public from the auction.** Normatively: `revealedTeamMembers` includes `declarerSeat` from the moment `CALL_CARDS` is accepted (it is never "unrevealed"), and no `PARTNER_REVEALED` event fires for the declarer's *declarer role*. If the declarer plays a called card they hold (secret solo), `PARTNER_REVEALED` **does** fire for that play like any other called-card play — it discloses that this called card is now accounted for, which is what `allPartnersRevealed` gates on.
-- Non-declarer team membership is **hidden** until revealed by play.
-- **Reveal is atomic with the card play.** When an accepted card play (§10) is a called card, the engine reveals that player as a team member **as part of the same play action**, *before* the next player in that trick is placed on turn. The reveal is broadcast to all clients immediately. This reveal is **never deferred to trick resolution** (`TRICK_RESOLVE` performs no reveals).
-- Because reveal happens the instant the card is placed, every player who acts later **in the same trick** already sees the revealed membership.
-- The game never explicitly labels partners in the UI before their card is played; defenders infer alliances from play.
-- If the declarer called a card they hold, that membership becomes public the moment the declarer plays that card, by the same atomic rule.
-- **Reveal-at-scoring:** every card is played before scoring (§10, §11), so by round end **every** called card has been played and every partner already revealed during play. Round-end scoring (§12) therefore reveals no *new* membership; it only confirms the team. Clients must still not display per-player round deltas until the round has fully ended (see §14.2).
+### 9.3 Team formation — the CLAIM model (v2.0, normative for both deck counts)
+
+**Membership by claim:** for each called card, the player who plays the **first copy** of that identity becomes a member of the declarer's team (that card's *claimant*). Team membership is determined **at play time**. All other players are **defenders**.
+
+- **Single-deck games:** exactly one copy exists, so the claimant is necessarily the holder — the claim model reproduces v1 behavior **identically** (a holder still privately knows they will be the partner, because only they can ever play the card; the client derives this from their own hand). No externally observable behavior changes for 1-deck games.
+- **Two-deck games:** two copies exist — in different hands, or both in one hand (including the declarer's). **Only the first-played copy claims.** Once claimed, the other copy is an **ordinary card**: no effect, no reveal, no share. Before the claim, *nobody* — not the copy-holders, not the declarer — knows who the partner will be; a copy-holder knows only that they **may** become the partner. Timing the play of a copy is real strategy (rush to join a strong declarer, or sit on it hoping the other copy lands first — `OPEN_RISKS.md` R13); timeout auto-play can claim on a player's behalf like any accepted play.
+- **The declarer is always a team member, publicly, from the auction.** `revealedTeamMembers` includes `declarerSeat` from the moment `CALL_CARDS` is accepted, and no `PARTNER_REVEALED` fires for the declarer *role*. If the declarer plays the first copy of a called card, they claim it like anyone else (`PARTNER_REVEALED` fires; the share is theirs — the solo path).
+- **Reveal (= claim) is atomic with the card play.** When an accepted play (§10) is the **first copy of an unclaimed called card**, the engine records the claim and reveals the claimant **as part of the same play action**, *before* the next player is placed on turn; the reveal is broadcast immediately and never deferred to `TRICK_RESOLVE`. Every player acting later in the same trick already sees it.
+- **Claim-at-scoring guarantee:** every card is played before scoring (§10, §11), so by round end every called card has been claimed and every partner revealed during play. Round-end scoring (§12) reveals no new membership. Clients must still not display per-player round deltas until the round has fully ended (§14.2).
+- **Hidden-information consequence (v2.0 simplification):** under the claim model, **no secret team membership exists at any time** — membership *is* the public claim record. The only secret remains hand contents (who holds copies), which §14.2 already protects. `allPartnersRevealed` ≡ all `C` called cards claimed.
 
 ### 9.4 Timeout during trump selection / partner calling (paused, not auto-selected)
 Unlike bidding and trick play, **the engine does NOT auto-select a trump suit or called card(s) on timeout.** A hand-independent default that leaked nothing (e.g. a fixed suit) would be strategically arbitrary, and a hand-dependent default would leak the declarer's hand — both were rejected, and **`PAUSED` is the confirmed permanent behavior (decided v1.9**, `OPEN_RISKS.md` D1 resolved; the abuse case is handled by the failed-contract pause-end rule below**)**. Instead, after the full configured turn budget (`turnTimerMs + graceMs`, a single combined budget — `ARCHITECTURE.md` §6) expires the room enters **`PAUSED`** (a non-terminal hold managed per `ARCHITECTURE.md` §6–§8) and waits for the declarer to act or the host to resolve. No trump/called-card value is ever fabricated by the engine.
@@ -205,8 +223,8 @@ Unlike bidding and trick play, **the engine does NOT auto-select a trump suit or
 
 **Score effect of ending from `PAUSED` (normative — changed in v1.9).** Because `PAUSED` is entered **only** via declarer-decision timeout (entry conditions above are exhaustive), an end-from-`PAUSED` is always the consequence of a declarer failing to act. If the host resolves a `PAUSED` room by **ending the game** (rather than resuming), the abandoned contract is scored as a **failure charged entirely to the declarer**:
 
-- the declarer receives `roundDelta = −(S × Y)` (the full team penalty — `S = C + 1` is known from the player count, §9.2);
-- **every other player receives `0`** — no partner exists yet at this point (`PAUSED` can only occur before `CALL_CARDS` is accepted, so no called-card holders have been determined, and no innocent seat can be dragged into the penalty);
+- the declarer receives `roundDelta = −(S × Y)` (the full team penalty — `S = C + 1`, where `C` is the game's configured called-card count, §9.2/§16);
+- **every other player receives `0`** — no partner exists yet at this point (`PAUSED` can only occur before `CALL_CARDS` is accepted, so nothing has been claimed and no innocent seat can be dragged into the penalty);
 - the round then ends; final standings are computed from all `totalScore`s including this delta.
 
 This closes the stall-escape exploit (`OPEN_RISKS.md` R9, now resolved): stalling out of a bad contract is strictly worse than playing it (`−(S × Y)` guaranteed vs. `−(S × Y)` worst case with a chance to make it, and the loss lands on the declarer alone instead of a future partner). Resuming instead returns control to the paused state with no score effect — a genuinely disconnected declarer is protected by the host choosing **resume**/wait; **end** is the host's judgment that the declarer has abandoned the contract. (Note the contrast with `ABORTED`-end, §14.1, which still applies **no** deltas — corruption is nobody's fault; a stalled declarer decision is the declarer's.)
@@ -233,7 +251,7 @@ This closes the stall-escape exploit (`OPEN_RISKS.md` R9, now resolved): stallin
 2. Otherwise, the **highest card of the led suit** wins.
 3. Cards of a non-led, non-trump suit can never win a trick.
 
-**Card uniqueness / tie safety (defensive, normative).** The deck contains **exactly one of every card**; two cards can never share both suit and rank. Consequently, when comparing the candidate cards in a trick (all trumps, or all cards of the led suit), **no two candidates can ever be equal in rank**, so a trick always has a **single, unambiguous winner** — ties in rank cannot occur. If the engine ever observes two identical cards in play (same suit and rank), or a rank tie among trick candidates, the state is **invalid and its behavior is undefined**; this indicates state corruption (e.g. a dealing or shuffling defect). Implementations **SHOULD** treat such a condition as a **fatal error** and halt/flag the game rather than attempt to resolve it, since any resolution would be arbitrary. This is a safety guard, not a gameplay rule — it can never trigger in a correct game.
+**Identical cards & tie resolution (normative, v2.0).** Each card identity exists in exactly `deckCount` copies. In 2-deck games two copies of the same card may be candidates in one trick; the tie is resolved by §4: **the earlier-played copy wins** (a candidate must be *strictly higher* to displace the current best). A trick therefore always has a single, unambiguous winner in every mode. **Corruption guard:** if the engine ever observes more than `deckCount` copies of any identity in play, the state is invalid — implementations SHOULD treat it as a fatal error (`ABORTED`) rather than resolve arbitrarily.
 
 **Point collection (per-seat accumulation — normative).** Point cards are accumulated **per player (seat)**, never per team, during play. When a trick is won, the value of its point cards is added to `capturedPoints[winnerSeat]`. The engine does **NOT** maintain or compute any team-level total during play. Team totals are a **derived quantity computed only at scoring time** (`ROUND_SCORING`, §11–§12) by summing the per-seat captured points of the declarer-team members. This representation is deliberate: per-seat totals are public/derivable (§14.2), whereas a running team total would leak hidden membership, so it must not exist as live state.
 
@@ -255,7 +273,7 @@ This ordering is **point-value-major on purpose**: it never sheds a point card w
 
 > **Known, accepted information effect:** because the rule is public and deterministic, an auto-play discloses a constraint on the timed-out player's hand (the played card is provably their tuple-minimum legal card; an off-suit auto-play proves they are void in the led suit — though voidness is equally proven by any manual off-suit play). This is inherent to *any* deterministic default and is accepted for v1; it is recorded in `OPEN_RISKS.md` alongside the related deliberate-timeout ("blameless AFK") strategy.
 
-**Accepted-play atomic steps.** When a play is accepted, the engine performs, in order, as one indivisible action: (1) remove `c` from `p`'s hand and place it in the trick; (2) if `c` is a called card, reveal `p` as a team member and broadcast it (§9.3); (3) determine whether the trick is complete (`playerCount` cards played). Only after these steps is the next player placed on turn (or the trick resolved). The reveal in step 2 is therefore visible to every later player in the same trick.
+**Accepted-play atomic steps.** When a play is accepted, the engine performs, in order, as one indivisible action: (1) remove `c` from `p`'s hand and place it in the trick; (2) if `c` is the **first copy of an unclaimed called card**, record `p` as its claimant, reveal the membership, and broadcast it (§9.3) — an already-claimed identity's second copy triggers nothing; (3) determine whether the trick is complete (`playerCount` cards played). Only after these steps is the next player placed on turn (or the trick resolved). The reveal in step 2 is therefore visible to every later player in the same trick.
 
 **Round completion guarantee.** A round consists of exactly `deckSize / playerCount` tricks; every dealt card is played exactly once. The engine **cannot enter round scoring until all tricks are complete** — every hand is empty. Consequently every called card is guaranteed to have been played (and its holder revealed) before scoring. An interrupted game is **resumable** from its exact mid-trick state and never skips ahead to scoring.
 
@@ -265,11 +283,11 @@ This ordering is **point-value-major on purpose**: it never sheds a point card w
 
 After **all tricks are complete** (every hand empty — see §10 Round completion guarantee), and only then, the team total is computed:
 
-- `declarerTeamPoints = Σ capturedPoints[seat]` over all seats `seat` that are declarer-team members (the declarer plus every called-card holder). This is the **first and only** point at which point cards are aggregated by team.
+- `declarerTeamPoints = Σ capturedPoints[seat]` over all seats `seat` that are declarer-team members (the declarer plus every claimant, §9.3). This is the **first and only** point at which point cards are aggregated by team.
 - The contract **succeeds** if `declarerTeamPoints ≥ Y`.
 - Otherwise the contract **fails**.
 
-Defender-held points are irrelevant to the result except insofar as points the defenders capture are points the declarer's team did **not** capture. (Because all 150 points are always captured by someone, `declarerTeamPoints = 150 − Σ capturedPoints[defenderSeat]`; the engine computes it directly from the per-seat totals.)
+Defender-held points are irrelevant to the result except insofar as points the defenders capture are points the declarer's team did **not** capture. (Because all `totalPoints` are always captured by someone, `declarerTeamPoints = totalPoints − Σ capturedPoints[defenderSeat]`; the engine computes it directly from the per-seat totals.)
 
 ---
 
@@ -284,7 +302,7 @@ Let:
 - one share for the **declarer role**, plus
 - one share per **called card**.
 
-A player's share count = (1 if they are the declarer) + (number of called cards they hold).
+A player's share count = (1 if they are the declarer) + (number of called cards they **claimed**, §9.3).
 
 **Per-round scoring.**
 - If the contract **succeeds**: each share scores **`+Y`**. Team total = **`+(S × Y)`**.
@@ -320,6 +338,13 @@ A single player receives `±Y` multiplied by the number of shares they own. So a
 
 - *Two distinct partners:* declarer `+120`, partner A `+120`, partner B `+120`; four defenders `0`. Team total `+360` (or `−360` on failure).
 - *Declarer holds both called cards (secret solo):* declarer `±360` alone; six defenders `0`.
+
+**2-deck 6-player game (`deckCount = 2`, creator-selected `C = 2`, `S = 3`), bid `Y = 180` of 300:**
+
+- *Two distinct claimants (seat2, seat4), team captures 190:* declarer `+180`, each claimant `+180`; three defenders `0`. Team total `+540`.
+- *Declarer claims one called card, seat3 the other:* declarer `+360` (2 shares), seat3 `+180`.
+- *One player holds both copies of a called card:* they can only claim it once — first copy played claims, the second is an ordinary card.
+- *Failure at 170 < 180:* mirrored negatives; defenders `0`.
 
 > Do **not** assume the team total is always `3Y`. It is `2Y` for 4–5 players and `3Y` for 6–7 players. Defenders **always** score exactly `0`, regardless of points they captured.
 
@@ -358,9 +383,10 @@ RoundState {
   declarerSeat: int                 // final declarer
   Y: int                            // winning bid
   trump: suit
-  calledCards: Card[]               // length C (1 or 2), all in-play, distinct
+  calledCards: Card[]               // length C (§9.2/§16), all in-play identities, distinct
+  claimedBy: (seat | null)[]        // parallel to calledCards; null = unclaimed; set at first-copy play (§9.3)
   revealedTeamMembers: Set<seat>    // seeded with {declarerSeat} when CALL_CARDS is accepted (§9.3);
-                                    // grows as called cards are played (§9.3);
+                                    // grows as called cards are CLAIMED (§9.3);
                                     // surfaced to clients under the SAME name in ClientView (§14.2)
   bidHistory: (seat, action)[]      // full auction record (bids + passes), public (§14.2)
   completedTricks: Trick[]          // all resolved tricks this round, public (§14.2)
@@ -377,9 +403,9 @@ RoundState {
 - **Transport-only fields** (e.g. `stateVersion`, `actionId`) are **not** part of gameplay state; they are defined in `MESSAGE_PROTOCOL.md` and must not affect any gameplay computation here.
 
 **Derived values.**
-- `C = (playerCount <= 5) ? 1 : 2`
+- `C = configured called-card count` (single-deck: fixed table §9.2; two-deck: creator option §16)
 - `S = C + 1`
-- `shareCount(seat) = (seat == declarerSeat ? 1 : 0) + countCalledCardsHeldBy(seat)`
+- `shareCount(seat) = (seat == declarerSeat ? 1 : 0) + countCalledCardsClaimedBy(seat)`
 - `declarerTeamPoints = Σ capturedPoints[seat] for seat where declarerTeamMember(seat)`  // computed only at ROUND_SCORING
 - `success = declarerTeamPoints >= Y`
 - `roundDelta(seat) = declarerTeamMember(seat) ? (success ? +Y : −Y) * shareCount(seat) : 0`
@@ -428,7 +454,7 @@ The server holds the full authoritative state; each client sees only a **persona
 
 **Point-leak rule (normative) — corrected in v1.6, reconciled in v1.7.** The threat is **not** per-player captured points. Every trick's winner and full contents are public (§14.2), and the winner is determined by a public rule, so **each player's own captured-point total is already derivable from public data** — forbidding the server to display it would be unenforceable (any client can compute it) and would not protect anything. The genuinely secret quantity is anything that requires attributing points to a **team whose membership is not yet fully revealed.** Therefore:
 
-The gating condition is **whether all partners are revealed**, not the round boundary. Define `allPartnersRevealed` = **all `C` called cards have been played** (§9.3; equivalently, `PARTNER_REVEALED` has fired `C` times this round — the declarer's role membership is public from the auction and does not enter this condition). Then:
+The gating condition is **whether all partners are revealed**, not the round boundary. Define `allPartnersRevealed` = **all `C` called cards have been claimed** (§9.3; equivalently, `PARTNER_REVEALED` has fired `C` times this round — the declarer's role membership is public from the auction and does not enter this condition). Then:
 
 - **Always permitted during play (public / derivable):** the cards on the table and in completed tricks, each trick's winner, and **per-seat captured-point totals** (a HUD showing "Dave has captured 45 points" is information-theoretically harmless and is allowed at all times).
 - **Forbidden while `allPartnersRevealed == false` (would leak hidden membership):**
@@ -446,7 +472,7 @@ Internally, no team total exists as live state during play (§10, §14 data mode
 playerView(authoritativeState, viewerSeat) -> ClientView
 ```
 
-that returns only the information the viewer is permitted to see per the rules above. `ClientView` contains: `ownHand`, `handCounts[seat]`, public facts (bids, `Y`, declarer, trump — null for non-declarer viewers until `CALL_CARDS` is accepted (§9.2 disclosure gating) — and calledCards), `tricks` (current + completed), `perPlayerCapturedPoints[seat]` (public/derivable, permitted during play), and `revealedTeamMembers` (⊆ team; always includes `viewerSeat` if the viewer is a member, and always includes `declarerSeat` from acceptance of `CALL_CARDS` onward, §9.3). It MUST NOT contain other players' hands, unrevealed partner ownership, the shuffle seed, team point totals or team-keyed contract progress **while any partner is unrevealed** (permitted once `allPartnersRevealed`, above), or any pre-`ROUND_END` per-player `roundDelta`/`success`. The server sends only `playerView(...)` outputs to clients; the raw authoritative state never leaves the server. (The transport wrapper — `stateVersion` and delivery — is defined in `MESSAGE_PROTOCOL.md`; it carries no gameplay meaning.)
+that returns only the information the viewer is permitted to see per the rules above. `ClientView` contains: `ownHand`, `handCounts[seat]`, public facts (bids, `Y`, declarer, trump — null for non-declarer viewers until `CALL_CARDS` is accepted (§9.2 disclosure gating) — and calledCards), `tricks` (current + completed), `perPlayerCapturedPoints[seat]` (public/derivable, permitted during play), and `revealedTeamMembers` (= the public claim record, §9.3: `declarerSeat` from acceptance of `CALL_CARDS` onward plus every claimant so far; under the claim model membership is public by construction, so no viewer-specific membership augmentation exists in v2.0 — a 1-deck holder's private "I will be the partner" knowledge is client-derivable from `ownHand` + `calledCards`). It MUST NOT contain other players' hands, unrevealed partner ownership, the shuffle seed, team point totals or team-keyed contract progress **while any partner is unrevealed** (permitted once `allPartnersRevealed`, above), or any pre-`ROUND_END` per-player `roundDelta`/`success`. The server sends only `playerView(...)` outputs to clients; the raw authoritative state never leaves the server. (The transport wrapper — `stateVersion` and delivery — is defined in `MESSAGE_PROTOCOL.md`; it carries no gameplay meaning.)
 
 **Spectators are out of scope for v1.** `playerView` is defined only for a **seated** `viewerSeat`; no spectator/observer projection is specified in v1. Implementations that add spectators later MUST define a separate, hidden-information-safe view (it cannot simply reuse a seated view, and must never expose unrevealed membership).
 
@@ -462,7 +488,7 @@ that returns only the information the viewer is permitted to see per the rules a
 - **Void player:** may discard any card, including a point card, with no obligation to trump (§10).
 - **Q♠ when Spades is trump:** Q♠ behaves as an ordinary trump of rank Q (below K♠ and A♠), and is still worth 30 points.
 - **All-pass:** impossible by construction — the standing bid of 75 guarantees a declarer (§8).
-- **Bid reaches 150:** bidding ends immediately (§8).
+- **Bid reaches `totalPoints`:** bidding ends immediately (§8).
 - **Comparing cards across suits:** only same-suit (or trump) comparisons matter; off-suit non-trump cards cannot win (§10).
 - **Hand of only trump:** when on lead, the player leads trump (legal). When following a non-trump lead, the player is void and may play any card, i.e. a trump (§10). Always has a legal move.
 - **Hand of one card (last trick):** the player plays it; it is legal because either it follows the led suit, or the player is void and any card is legal. Never a stuck state.
@@ -476,11 +502,13 @@ that returns only the information the viewer is permitted to see per the rules a
 
 These are intentionally left as configuration, not rules:
 
-1. **`round1DefaultDeclarerSelection`** — how the round-1 default declarer is picked. Default: **random**. (Alternative: fixed seat.) Clockwise rotation thereafter is fixed (§7). **This is NOT the shuffle seed** — the shuffle seed is server-generated per round, never host-configurable, never exposed during play (§3.1).
-2. **Number of rounds `N`** — default **`2 × playerCount`**; SHOULD be a multiple of `playerCount`; custom values allowed with a mandatory uneven-rotation warning (§13). **Validation (normative): `N` must be an integer with `1 ≤ N ≤ 10 × playerCount`; any other value is rejected at `LOBBY`.** (`N = 0` would produce a degenerate instant `GAME_END` in which every player "shares victory" at 0.)
-3. **Turn timer** — per-turn time limit and grace period driving the timeout default actions (auto-pass §8.6 / auto-play §10 / `PAUSED` §9.4). Duration is configurable; the *default actions themselves are normative*, not configurable. **Validation (normative): the combined budget `turnTimerMs + graceMs` must be ≥ 10 000 ms**, and `reconnectGraceMs` must satisfy `1 000 ms ≤ reconnectGraceMs ≤ turnTimerMs + graceMs`; violating configs are rejected at `LOBBY` (a near-zero budget turns every declarer decision into an instant `PAUSED` and every turn into an auto-action). The combined budget is the **single** escalation clock — disconnects never start a competing timer (`ARCHITECTURE.md` §7). Timer mechanism: `ARCHITECTURE.md`.
-4. **`seatAssignment`** — how players map to seats at game start (§2). Default: **random** (server-side, audited CSPRNG per `ARCHITECTURE.md` §5). Alternative: **host-arranged** (explicit, lobby-visible ordering). Join order is never used implicitly.
-5. **Uneven-rotation warning visibility** — when `N mod playerCount ≠ 0`, the §13 warning **MUST be shown to every player** (e.g. in the lobby before ready-up), not only to the host who chose `N` — otherwise the person configuring the asymmetry is the only one warned about it.
+1. **`deckCount`** — **1 or 2** (default 1), fixed at creation. **2 is valid only for 6–7 players** (rejected at `LOBBY` otherwise, §3). Sets `totalPoints = 150 × deckCount`, the standing bid (`totalPoints/2`), the bid cap (`totalPoints`), the trim table (§3), and enables the claim-timing dynamics of §9.3.
+2. **`calledCount`** — the called-card count `C`. **Single-deck: not configurable** (fixed table, §9.2). **Two-deck: creator-selected 1–3, default 2**; selecting 3 MUST surface a swinginess note (team totals reach ±4Y). Validated at `LOBBY`.
+3. **`round1DefaultDeclarerSelection`** — how the round-1 default declarer is picked. Default: **random**. (Alternative: fixed seat.) Clockwise rotation thereafter is fixed (§7). **This is NOT the shuffle seed** — the shuffle seed is server-generated per round, never host-configurable, never exposed during play (§3.1).
+4. **Number of rounds `N`** — default **`2 × playerCount`**; SHOULD be a multiple of `playerCount`; custom values allowed with a mandatory uneven-rotation warning (§13). **Validation (normative): `N` must be an integer with `1 ≤ N ≤ 10 × playerCount`; any other value is rejected at `LOBBY`.** (`N = 0` would produce a degenerate instant `GAME_END` in which every player "shares victory" at 0.)
+5. **Turn timer** — per-turn time limit and grace period driving the timeout default actions (auto-pass §8.6 / auto-play §10 / `PAUSED` §9.4). Duration is configurable; the *default actions themselves are normative*, not configurable. **Validation (normative): the combined budget `turnTimerMs + graceMs` must be ≥ 10 000 ms**, and `reconnectGraceMs` must satisfy `1 000 ms ≤ reconnectGraceMs ≤ turnTimerMs + graceMs`; violating configs are rejected at `LOBBY` (a near-zero budget turns every declarer decision into an instant `PAUSED` and every turn into an auto-action). The combined budget is the **single** escalation clock — disconnects never start a competing timer (`ARCHITECTURE.md` §7). Timer mechanism: `ARCHITECTURE.md`.
+6. **`seatAssignment`** — how players map to seats at game start (§2). Default: **random** (server-side, audited CSPRNG per `ARCHITECTURE.md` §5). Alternative: **host-arranged** (explicit, lobby-visible ordering). Join order is never used implicitly.
+7. **Uneven-rotation warning visibility** — when `N mod playerCount ≠ 0`, the §13 warning **MUST be shown to every player** (e.g. in the lobby before ready-up), not only to the host who chose `N` — otherwise the person configuring the asymmetry is the only one warned about it.
 
 **Removed / out of scope in v1:** secondary tie-breakers (ties are shared victories only, §13 — **decided v1.9: no tie-breaker will be added for casual play**; revisit only for ranked modes); post-game extension (`GAME_END` is terminal); spectator views (§14.2).
 
@@ -491,6 +519,15 @@ Remaining deferred decisions (kamikaze mitigation trigger) are tracked in `OPEN_
 ---
 
 ## 17. Changelog
+
+- **v2.0** — **Two-deck mode** (product enhancement; 1-deck games unchanged in behavior):
+  - **`deckCount` 1|2 at creation (§16);** 2 decks valid only for 6–7 players (§2/§3). `totalPoints = 150 × deckCount`; standing bid `totalPoints/2` (150 in 2-deck), cap `totalPoints` (300) — §5/§8 generalized (75/150 are now the 1-deck instances of the formulas).
+  - **Trim tables ×2 (§3):** 6p removes one 2♣ + one 2♦ (102/17 each); 7p removes both 2♣, both 2♦, one 2♥, one 2♠ (98/14 each); trim rule gains a per-copy pass clause. Canonical order gains a copy-index tertiary key; **KAT-002** locks the 2-deck deal.
+  - **Tie rule (§4/§10):** first-played copy wins identical-card ties (strictly-higher displacement). The old uniqueness fatal guard becomes a `> deckCount` copies corruption guard.
+  - **CLAIM model (§9.3):** team membership = first player to PLAY a copy of each called card. Generalizes v1 exactly for single deck; in 2-deck games nobody (including holders and declarer) knows the partner until a copy lands, making claim-timing a strategy (R13). Second copies of claimed cards are ordinary. Membership is public by construction — the hidden-info model simplifies (no secret membership exists; hands remain the only secret).
+  - **`calledCount` creator option (§9.2/§16):** 2-deck games choose C ∈ 1–3 (default 2; C=3 flagged swingy). Single-deck table unchanged. Scoring/shares formulas unchanged (`S = C + 1`, claim-based share counts).
+  - **Data model (§14):** `claimedBy[]` replaces deal-time holder tracking; derived values keyed to claims.
+  - Companions: `MESSAGE_PROTOCOL.md` v1.5 (`deckCount`/`calledCount` in room creation; view carries `deckCount`/`totalPoints`), `OPEN_RISKS.md` (R13 claim-timing meta, R14 tie-rule learnability), `TEST_CASES.md` (KAT-002, TIE-001, CLAIM-001/002, CONFIG-004; §1–§5 suites re-parameterized).
 
 - **v1.9** — Product-decision pass (all six open decisions resolved by product owner):
   - **Pause-end scoring (§9.4, §14.1) — scoring change, approved:** ending a `PAUSED` room (always caused by declarer-decision timeout; entry is exhaustive) scores the abandoned contract as a failure charged to the declarer alone: declarer `roundDelta = −(S×Y)`, all others `0` (no partner can exist yet — `PAUSED` precedes `CALL_CARDS`). Stalling is now strictly dominated by playing the contract; R9 closed. `ABORTED`-end unchanged (still voids — corruption is nobody's fault).

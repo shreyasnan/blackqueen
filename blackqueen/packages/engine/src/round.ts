@@ -27,9 +27,8 @@ export interface RoundData {
   stagedTrump: Suit | null; // §9.2: staged, unversioned, undisclosed
   trump: Suit | null; // committed at CALL_CARDS
   calledCards: Card[];
-  calledCardHolders: number[]; // SECRET until revealed
-  revealedTeamMembers: number[]; // seeded with declarerSeat at CALL_CARDS (§9.3)
-  playedCalledCards: string[]; // cardKeys of called cards already played (drives allPartnersRevealed)
+  claimedBy: (number | null)[]; // CLAIM model §9.3: parallel to calledCards; set when the FIRST copy is played
+  revealedTeamMembers: number[]; // public claim record: declarerSeat (at CALL_CARDS) + claimants
   trickLeaderSeat: number;
   currentTrick: TrickPlay[];
   completedTricks: { plays: TrickPlay[]; winnerSeat: number }[];
@@ -40,6 +39,9 @@ export interface RoundData {
 export interface GameState {
   playerCount: number;
   N: number;
+  deckCount: number; // 1 | 2 (§3/§16); 2 only for 6–7 players
+  calledCount: number; // C (§9.2/§16)
+  totalPoints: number; // 150 × deckCount (§5)
   roundNumber: number; // 1-based; 0 = not started
   totalScore: number[];
   phase: Phase;
@@ -83,11 +85,20 @@ export type ApplyResult =
   | { ok: true; state: GameState; events: Event[]; versionBump: boolean }
   | { ok: false; reject: "ILLEGAL" | "NOT_YOUR_TURN" | "WRONG_PHASE" };
 
-export function initGame(playerCount: number, N: number, round1DefaultDeclarerSeat: number): GameState {
+export function initGame(playerCount: number, N: number, round1DefaultDeclarerSeat: number, deckCount = 1, calledCountOverride?: number): GameState {
   if (playerCount < 4 || playerCount > 7) throw new Error("4–7 players only (§2)");
+  if (deckCount !== 1 && deckCount !== 2) throw new Error("deckCount must be 1 or 2 (§16)");
+  if (deckCount === 2 && playerCount < 6) throw new Error("2-deck games require 6–7 players (§3/§16)");
   if (!Number.isInteger(N) || N < 1 || N > 10 * playerCount) throw new Error("N out of bounds (§16)");
+  const calledCount = deckCount === 2
+    ? (calledCountOverride ?? 2)
+    : calledCardCount(playerCount); // single-deck: fixed table, override ignored (§9.2)
+  if (deckCount === 2 && (calledCount < 1 || calledCount > 3 || !Number.isInteger(calledCount))) {
+    throw new Error("calledCount must be 1–3 in 2-deck games (§16)");
+  }
   return {
     playerCount, N,
+    deckCount, calledCount, totalPoints: 150 * deckCount,
     roundNumber: 0,
     totalScore: Array(playerCount).fill(0),
     phase: "ROUND_END" as Phase, // pre-game: awaiting first START_ROUND
@@ -101,7 +112,7 @@ export function initGame(playerCount: number, N: number, round1DefaultDeclarerSe
 const reject = (reason: "ILLEGAL" | "NOT_YOUR_TURN" | "WRONG_PHASE"): ApplyResult => ({ ok: false, reject: reason });
 
 export function allPartnersRevealed(r: RoundData): boolean {
-  return r.calledCards.length > 0 && r.playedCalledCards.length === r.calledCards.length;
+  return r.calledCards.length > 0 && r.claimedBy.length === r.calledCards.length && r.claimedBy.every((s) => s !== null);
 }
 
 export function applyAction(state: GameState, action: Action): ApplyResult {
@@ -138,8 +149,8 @@ function startRound(state: GameState, action: { seed: Uint8Array; abandonedSeats
   }
   if (skipped.length > 0) events.push({ kind: "ROTATION_SKIPPED", skippedSeats: skipped, newDefaultDeclarerSeat: seat });
 
-  const hands = deal(state.playerCount, seat, action.seed);
-  const bidding = initBidding(state.playerCount, seat);
+  const hands = deal(state.playerCount, seat, action.seed, state.deckCount);
+  const bidding = initBidding(state.playerCount, seat, state.totalPoints / 2);
   const round: RoundData = {
     defaultDeclarerSeat: seat,
     hands,
@@ -149,9 +160,8 @@ function startRound(state: GameState, action: { seed: Uint8Array; abandonedSeats
     stagedTrump: null,
     trump: null,
     calledCards: [],
-    calledCardHolders: [],
+    claimedBy: [],
     revealedTeamMembers: [],
-    playedCalledCards: [],
     trickLeaderSeat: -1,
     currentTrick: [],
     completedTricks: [],
@@ -176,7 +186,7 @@ function startRound(state: GameState, action: { seed: Uint8Array; abandonedSeats
 
 function bid(state: GameState, seat: number, value: number): ApplyResult {
   if (state.phase !== "BIDDING" || !state.round) return reject("WRONG_PHASE");
-  const res = applyBid(state.round.bidding, state.playerCount, seat, value);
+  const res = applyBid(state.round.bidding, state.playerCount, seat, value, state.totalPoints);
   if (!res.ok) return reject(res.reason as "ILLEGAL" | "NOT_YOUR_TURN");
   const events: Event[] = [{ kind: "BID_PLACED", seat, value }];
   return finishBidStep(state, res, events);
@@ -224,13 +234,13 @@ function callCards(state: GameState, seat: number, cards: Card[]): ApplyResult {
   if (state.phase !== "CALLING_PARTNERS" || !state.round) return reject("WRONG_PHASE");
   const r = state.round;
   if (seat !== r.declarerSeat) return reject("NOT_YOUR_TURN");
-  const C = calledCardCount(state.playerCount);
+  const C = state.calledCount;
   if (cards.length !== C) return reject("ILLEGAL");
-  const inPlay = new Set(canonicalDeck(state.playerCount).map(cardKey));
-  if (!cards.every((c) => inPlay.has(cardKey(c)))) return reject("ILLEGAL"); // must be in play
-  if (C === 2 && cardEq(cards[0]!, cards[1]!)) return reject("ILLEGAL"); // distinct
+  const inPlay = new Set(canonicalDeck(state.playerCount, state.deckCount).map(cardKey));
+  if (!cards.every((c) => inPlay.has(cardKey(c)))) return reject("ILLEGAL"); // identity must have a copy in play (§9.2)
+  const keys = cards.map(cardKey);
+  if (new Set(keys).size !== keys.length) return reject("ILLEGAL"); // pairwise-distinct identities
 
-  const holders = cards.map((c) => r.hands.findIndex((h) => h.some((hc) => cardEq(hc, c))));
   // §9.2 + §9.3: single versioned transition — TRUMP_CHOSEN + CARDS_CALLED at consecutive seq.
   const events: Event[] = [
     { kind: "TRUMP_CHOSEN", suit: r.stagedTrump! },
@@ -241,7 +251,7 @@ function callCards(state: GameState, seat: number, cards: Card[]): ApplyResult {
     trump: r.stagedTrump,
     stagedTrump: null,
     calledCards: cards,
-    calledCardHolders: holders,
+    claimedBy: cards.map(() => null), // CLAIM model: nothing claimed until a first copy is played
     revealedTeamMembers: [r.declarerSeat], // §9.3: declarer seeded — public role membership
     trickLeaderSeat: r.declarerSeat, // §10: declarer leads trick 1
     turnSeat: r.declarerSeat,
@@ -259,21 +269,26 @@ function playCard(state: GameState, seat: number, card: Card, auto: boolean): Ap
 
   // §10 accepted-play atomic steps
   const events: Event[] = [{ kind: "CARD_PLAYED", seat, card, auto }];
-  const hands = r.hands.map((h, i) => (i === seat ? h.filter((c) => !cardEq(c, card)) : h));
+  // remove exactly ONE copy — a hand may hold two identical cards in 2-deck games
+  const removeIdx = hand.findIndex((c) => cardEq(c, card));
+  const hands = r.hands.map((h, i) => (i === seat ? h.filter((_, j) => j !== removeIdx) : h));
   const currentTrick = [...r.currentTrick, { seat, card }];
   let revealedTeamMembers = r.revealedTeamMembers;
-  let playedCalledCards = r.playedCalledCards;
-  if (r.calledCards.some((cc) => cardEq(cc, card))) {
+  let claimedBy = r.claimedBy;
+  const claimIdx = r.calledCards.findIndex((cc, i) => cardEq(cc, card) && r.claimedBy[i] === null);
+  if (claimIdx >= 0) {
+    // CLAIM (§9.3): first copy of an unclaimed called card — claimant joins the team, atomically.
+    // A later copy of an already-claimed identity matches nothing here: ordinary card, no event.
+    claimedBy = claimedBy.map((s, i) => (i === claimIdx ? seat : s));
     events.push({ kind: "PARTNER_REVEALED", seat, card }); // atomic with the play, before next turn (§9.3)
     if (!revealedTeamMembers.includes(seat)) revealedTeamMembers = [...revealedTeamMembers, seat];
-    playedCalledCards = [...playedCalledCards, cardKey(card)];
   }
 
-  let round: RoundData = { ...r, hands, currentTrick, revealedTeamMembers, playedCalledCards };
+  let round: RoundData = { ...r, hands, currentTrick, revealedTeamMembers, claimedBy };
 
   if (currentTrick.length === state.playerCount) {
     // TRICK_RESOLVE (engine step): per-seat crediting only (§10/§14.1)
-    const winnerSeat = trickWinner(currentTrick, round.trump!);
+    const winnerSeat = trickWinner(currentTrick, round.trump!, state.deckCount);
     const pts = trickPoints(currentTrick);
     const capturedPoints = round.capturedPoints.map((p, i) => (i === winnerSeat ? p + pts : p));
     events.push({ kind: "TRICK_WON", winnerSeat, points: pts, capturedPointsWinner: capturedPoints[winnerSeat]! });
@@ -295,7 +310,8 @@ function playCard(state: GameState, seat: number, card: Card, auto: boolean): Ap
 }
 
 function scoreAndEndRound(state: GameState, round: RoundData, events: Event[]): ApplyResult {
-  const score = scoreRound(state.playerCount, round.Y, round.declarerSeat, round.calledCards, round.calledCardHolders, round.capturedPoints);
+  const claimants = round.claimedBy.map((s) => s!); // round complete ⇒ every called card claimed (§9.3)
+  const score = scoreRound(state.playerCount, round.Y, round.declarerSeat, round.calledCards, claimants, round.capturedPoints);
   const totalScore = state.totalScore.map((t, i) => t + score.roundDelta[i]!);
   events.push({
     kind: "ROUND_SCORED",
@@ -351,7 +367,7 @@ function resolvePause(state: GameState, resolution: "resume" | "end"): ApplyResu
 /** §9.4 v1.9: abandoned contract = failure charged to the declarer alone. */
 function endFromPaused(state: GameState): ApplyResult {
   const r = state.round!;
-  const delta = pauseEndDelta(state.playerCount, r.Y, r.declarerSeat);
+  const delta = pauseEndDelta(state.playerCount, r.Y, r.declarerSeat, state.calledCount);
   const totalScore = state.totalScore.map((t, i) => t + delta[i]!);
   const events: Event[] = [
     {

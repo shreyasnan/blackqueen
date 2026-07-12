@@ -79,8 +79,8 @@ export function shuffle(deck: Card[], seed: Uint8Array): Card[] {
 }
 
 /** GAME_SPEC §3.1 steps 1–5: full reproducible deal. Returns hands indexed by seat. */
-export function deal(playerCount: number, defaultDeclarerSeat: number, shuffleSeed: Uint8Array): Card[][] {
-  const shuffled = shuffle(canonicalDeck(playerCount), shuffleSeed);
+export function deal(playerCount: number, defaultDeclarerSeat: number, shuffleSeed: Uint8Array, deckCount = 1): Card[][] {
+  const shuffled = shuffle(canonicalDeck(playerCount, deckCount), shuffleSeed);
   const hands: Card[][] = Array.from({ length: playerCount }, () => []);
   shuffled.forEach((card, i) => {
     hands[(defaultDeclarerSeat + i) % playerCount]!.push(card);

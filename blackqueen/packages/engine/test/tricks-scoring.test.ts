@@ -127,3 +127,27 @@ describe("RANK-001 — competition ranking (1224)", () => {
     expect(competitionRanks([300, 300, 150, 150, -75])).toEqual([1, 1, 3, 3, 5]);
   });
 });
+
+describe("TIE-001 — first-played copy wins (2-deck, TEST_CASES §11)", () => {
+  it("identical led cards: earlier copy holds", () => {
+    const plays = [
+      { seat: 0, card: c("KH") }, { seat: 1, card: c("KH") },
+      { seat: 2, card: c("9H") }, { seat: 3, card: c("3H") },
+    ];
+    expect(trickWinner(plays, "S", 2)).toBe(0);
+  });
+  it("identical trumps: earlier copy holds", () => {
+    const plays = [
+      { seat: 0, card: c("4H") }, { seat: 1, card: c("QS") },
+      { seat: 2, card: c("9H") }, { seat: 3, card: c("QS") },
+    ];
+    expect(trickWinner(plays, "S", 2)).toBe(1);
+  });
+  it("corruption guard: more copies than the deck contains is fatal", () => {
+    const plays = [
+      { seat: 0, card: c("KH") }, { seat: 1, card: c("KH") }, { seat: 2, card: c("KH") },
+    ];
+    expect(() => trickWinner(plays, "S", 2)).toThrow();
+    expect(() => trickWinner(plays.slice(0, 2), "S", 1)).toThrow(); // 2 copies in a 1-deck game
+  });
+});

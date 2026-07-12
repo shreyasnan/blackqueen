@@ -110,7 +110,10 @@ export function Table() {
 
 /** The declarer's moment, all in one place: "You win the bid" → choose trump → pick partner card(s).
  *  Replaces the crown-overlay-then-tiny-controls flow and the typed card input. */
-const TRIMMED: Record<number, string[]> = { 4: [], 5: ["2C", "2D"], 6: ["2C", "2D", "2H", "2S"], 7: ["2C", "2D", "2H"] }; // §3 (public)
+const TRIMMED: Record<number, string[]> = { 4: [], 5: ["2C", "2D"], 6: ["2C", "2D", "2H", "2S"], 7: ["2C", "2D", "2H"] }; // §3 single-deck (public)
+/** Fully-dead identities (§3): in 2-deck games an identity is dead only if BOTH copies were trimmed. */
+const deadIdentities = (playerCount: number, deckCount: number): string[] =>
+  deckCount === 2 ? (playerCount === 7 ? ["2C", "2D"] : []) : TRIMMED[playerCount] ?? [];
 const RANKS_DESC: Card["rank"][] = ["A", "K", "Q", "J", "10", "9", "8", "7", "6", "5", "4", "3", "2"];
 
 function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
@@ -122,8 +125,8 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
   useEffect(() => { if (!open) setPicked([]); }, [open]);
   if (!open) return null;
 
-  const C = v.playerCount <= 5 ? 1 : 2;
-  const trimmed = new Set(TRIMMED[v.playerCount] ?? []);
+  const C = v.calledCount ?? (v.playerCount <= 5 ? 1 : 2);
+  const trimmed = new Set(deadIdentities(v.playerCount, v.deckCount ?? 1));
   const inHand = (c: Card) => v.ownHand.some((h) => h.rank === c.rank && h.suit === c.suit);
   const isPicked = (c: Card) => picked.some((p) => p.rank === c.rank && p.suit === c.suit);
   const toggle = (c: Card) => {
@@ -141,7 +144,7 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
         {/* the moment */}
         <div style={{ fontSize: 20 }}>♛ <b>You win the bid</b></div>
         <div style={{ fontSize: 34, fontWeight: 800, color: "var(--gold)", lineHeight: 1.1 }}>{v.Y}</div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>your team must capture {v.Y} of 150 points</div>
+        <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>your team must capture {v.Y} of {v.totalPoints ?? 150} points</div>
 
         {/* step 1: trump */}
         <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, color: "var(--ink-soft)", margin: "6px 0 4px" }}>
@@ -171,7 +174,9 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
             SELECT {C} CARD{C > 1 ? "S" : ""} TO BE YOUR PARTNER{C > 1 ? "S" : ""}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 6 }}>
-            whoever holds {C > 1 ? "them" : "it"} secretly joins your team — call a card you hold to go solo
+            {(v.deckCount ?? 1) === 2
+              ? <>two copies of every card exist — <b>whoever plays the first copy joins your team</b> (maybe even you)</>
+              : <>whoever holds {C > 1 ? "them" : "it"} secretly joins your team — call a card you hold to go solo</>}
           </div>
           {SUITS.map((s) => {
             const SUIT_NAMES: Record<string, string> = { S: "Spades", H: "Hearts", C: "Clubs", D: "Diamonds" };
@@ -691,24 +696,25 @@ function Controls({ view: v, isHost }: { view: ExtendedView; isHost: boolean }) 
 }
 
 function BidBox({ view: v }: { view: ExtendedView }) {
-  const min = (v.currentHighBid ?? 75) + 5;
+  const cap = v.totalPoints ?? 150;
+  const min = (v.currentHighBid ?? cap / 2) + 5;
   const [val, setVal] = useState(min);
   useEffect(() => setVal(min), [min]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") setVal((x) => Math.max(min, x - 5));
-      if (e.key === "ArrowRight") setVal((x) => Math.min(150, x + 5));
+      if (e.key === "ArrowRight") setVal((x) => Math.min(cap, x + 5));
       if (e.key === "Enter") sendAction("BID", { value: val });
       if (e.key.toLowerCase() === "p") sendAction("PASS", {});
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [min, val]);
+  }, [min, val, cap]);
   return (
     <Row>
       <button style={btnSec} onClick={() => setVal((x) => Math.max(min, x - 5))}>−5</button>
       <b style={{ fontSize: 24, minWidth: 52, textAlign: "center" }}>{val}</b>
-      <button style={btnSec} onClick={() => setVal((x) => Math.min(150, x + 5))}>+5</button>
+      <button style={btnSec} onClick={() => setVal((x) => Math.min(cap, x + 5))}>+5</button>
       <button style={btn} onClick={() => sendAction("BID", { value: val })}>Bid {val}</button>
       <button style={{ ...btnSec, marginLeft: 20 }} onClick={() => sendAction("PASS", {})}>Pass</button>
     </Row>
@@ -767,17 +773,20 @@ function Hand({ view: v }: { view: ExtendedView }) {
         </div>
       )}
     <div style={{ position: "relative", display: "flex", justifyContent: "center", alignItems: "flex-end", padding: "2px 0 2px", minHeight: cardW * 1.42 + 20, width: "100%" }}>
-      {hand.map((c, i) => {
+      {(() => { const seen = new Map<string, number>(); return hand.map((c, i) => {
         const mid = (n - 1) / 2;
         const rot = n > 1 ? (i - mid) * Math.min(2.6, 26 / n) : 0; // gentler rotation: hit boxes ≈ visuals
         const lift = Math.abs(i - mid) * Math.min(1.6, 14 / n);
+        const base = `${c.rank}${c.suit}`;
+        const copy = seen.get(base) ?? 0; // 2-deck: two identical cards need distinct React keys
+        seen.set(base, copy + 1);
         return (
-          <div key={`${c.rank}${c.suit}`} style={{ marginLeft: i === 0 ? 0 : overlap, transform: `rotate(${rot}deg) translateY(${lift}px)`, zIndex: i }}>
+          <div key={`${base}-${copy}`} style={{ marginLeft: i === 0 ? 0 : overlap, transform: `rotate(${rot}deg) translateY(${lift}px)`, zIndex: i }}>
             <DraggableCard card={c} width={cardW} playable={myTurn && legal.has(`${c.rank}${c.suit}`)}
               dimmed={myTurn && !legal.has(`${c.rank}${c.suit}`)} focused={myTurn && i === focus} />
           </div>
         );
-      })}
+      }); })()}
     </div>
     </div>
   );
@@ -1012,7 +1021,9 @@ function feedLine(v: ExtendedView | null) {
       case "PLAYER_PASSED": return d.auto ? `${name(d.seat)} dozed — auto-pass` : `${name(d.seat)} ${verb(d.seat, "pass", "passes")}`;
       case "AUCTION_ENDED": return `${name(d.declarerSeat)} ${verb(d.declarerSeat, "win", "wins")} the bid at ${d.Y}`;
       case "TRUMP_CHOSEN": return `Trump: ${GLYPH[d.suit]}`;
-      case "CARDS_CALLED": return `Called: ${d.cards.map((c: Card) => ck(c)).join(" ")} — someone is secretly on the team`;
+      case "CARDS_CALLED": return v && (v.deckCount ?? 1) === 2
+        ? `Called: ${d.cards.map((c: Card) => ck(c)).join(" ")} — first to play one joins the team`
+        : `Called: ${d.cards.map((c: Card) => ck(c)).join(" ")} — someone is secretly on the team`;
       case "CARD_PLAYED": return `${name(d.seat)} ${verb(d.seat, "play", "plays")} ${ck(d.card)}${isQS(d.card) ? " — thirty points of trouble" : ""}${d.auto ? " (auto)" : ""}`;
       case "PARTNER_REVEALED": return `${name(d.seat)} ${verb(d.seat, "are", "is")} with the declarer! (${ck(d.card)})`;
       case "TRICK_WON": return `${name(d.winnerSeat)} ${verb(d.winnerSeat, "take", "takes")} the hand${d.points ? ` (+${d.points})` : ""}`;
@@ -1351,13 +1362,16 @@ function PartnerStatus({ view: v }: { view: ExtendedView }) {
   const holdCalled = v.calledCards.filter((c) => v.ownHand.some((h) => h.rank === c.rank && h.suit === c.suit));
   const names = (xs: number[]) => xs.map((s) => firstName(v, s)).join(" & "); // names only — faceOf returns an id, not a glyph
 
+  const twoDeck = (v.deckCount ?? 1) === 2;
   let text: React.ReactNode; let strong = false;
   if (iAmDeclarer) {
     if (v.allPartnersRevealed) {
       strong = true;
       text = partners.length === 0
-        ? <>You played your own called card — <b>you are SOLO</b>. Everyone is against you.</>
+        ? <>You claimed your own called card{v.calledCount! > 1 ? "s" : ""} — <b>you are SOLO</b>. Everyone is against you.</>
         : <>Your partner{partners.length > 1 ? "s" : ""}: <b>{names(partners)}</b> 🤝</>;
+    } else if (twoDeck) {
+      text = <>{partners.length > 0 && <><b>{names(partners)}</b> is with you; </>}the <b>first player to play</b> {calledStr} joins your team — <b>nobody knows who yet</b>{holdCalled.length > 0 && <>. You hold {holdCalled.length > 1 ? "copies" : "a copy"} — play it first to go solo</>}.</>;
     } else if (holdCalled.length === v.calledCards.length) {
       text = <>You hold {calledStr} yourself — <b>you're going SOLO</b> (nobody knows yet).</>;
     } else {
@@ -1365,13 +1379,17 @@ function PartnerStatus({ view: v }: { view: ExtendedView }) {
     }
   } else if (v.revealedTeamMembers.includes(me)) {
     strong = v.allPartnersRevealed;
-    text = holdCalled.length > 0 && !v.allPartnersRevealed
-      ? <>🤫 You hold {holdCalled.map(ck).join(" + ")} — <b>secretly with {firstName(v, v.declarerSeat)}</b>. Revealed when you play it.</>
-      : <>You're on <b>{firstName(v, v.declarerSeat)}</b>'s team 🤝 — you need <b>{v.Y}</b> together.</>;
+    text = <>You're on <b>{firstName(v, v.declarerSeat)}</b>'s team 🤝 — you need <b>{v.Y}</b> together.</>;
+  } else if (twoDeck && holdCalled.length > 0 && !v.allPartnersRevealed) {
+    text = <>🎯 You hold {holdCalled.length > 1 ? "copies" : "a copy"} of {holdCalled.map(ck).join(" + ")} — <b>play it first and you join {firstName(v, v.declarerSeat)}'s team</b>. Or sit on it and hope the other copy lands…</>;
+  } else if (!twoDeck && holdCalled.length > 0 && !v.allPartnersRevealed) {
+    text = <>🤫 You hold {holdCalled.map(ck).join(" + ")} — <b>secretly with {firstName(v, v.declarerSeat)}</b>. Revealed when you play it.</>;
   } else {
     text = v.allPartnersRevealed
       ? <>Teams are known: <b>{names([v.declarerSeat, ...partners])}</b> vs. the rest. Hold them under <b>{v.Y}</b>.</>
-      : <>Someone secretly holds {calledStr}. Watch closely…</>;
+      : twoDeck
+        ? <>The <b>first player to play</b> {calledStr} joins the declarer. Watch every card…</>
+        : <>Someone secretly holds {calledStr}. Watch closely…</>;
   }
   return (
     <div style={{ textAlign: "center", padding: "5px 10px", margin: "2px 0", borderRadius: 8, fontSize: 13.5, background: strong ? "var(--gold)" : "rgba(255,253,247,.75)", color: strong ? "#fff" : "var(--ink)", border: "1px solid rgba(59,34,71,.12)" }}>

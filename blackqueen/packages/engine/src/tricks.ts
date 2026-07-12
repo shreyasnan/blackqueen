@@ -17,17 +17,23 @@ export function isLegalPlay(hand: Card[], ledSuit: Suit | null, card: Card): boo
   return hand.some((c) => cardEq(c, card)) && legalPlays(hand, ledSuit).some((c) => cardEq(c, card));
 }
 
-/** §10 winning rules. Throws on rank ties (card-uniqueness fatal guard → engine treats as corruption). */
-export function trickWinner(plays: TrickPlay[], trump: Suit): number {
+/** §10/§4 winning rules. Ties (identical cards, 2-deck): FIRST-played copy wins —
+ *  a candidate must be STRICTLY higher to displace the current best.
+ *  Corruption guard: more than `deckCount` copies of one identity in a trick is fatal. */
+export function trickWinner(plays: TrickPlay[], trump: Suit, deckCount = 1): number {
+  const copies = new Map<string, number>();
+  for (const p of plays) {
+    const k = `${p.card.rank}${p.card.suit}`;
+    const n = (copies.get(k) ?? 0) + 1;
+    if (n > deckCount) throw new Error("FATAL: more copies than the deck contains — state corruption (§10)");
+    copies.set(k, n);
+  }
   const ledSuit = plays[0]!.card.suit;
   const trumps = plays.filter((p) => p.card.suit === trump);
   const candidates = trumps.length > 0 ? trumps : plays.filter((p) => p.card.suit === ledSuit);
   let best: TrickPlay | null = null;
   for (const p of candidates) {
-    if (best && rankIndex(p.card.rank) === rankIndex(best.card.rank)) {
-      throw new Error("FATAL: rank tie among trick candidates — state corruption (§10)");
-    }
-    if (!best || rankIndex(p.card.rank) > rankIndex(best.card.rank)) best = p;
+    if (!best || rankIndex(p.card.rank) > rankIndex(best.card.rank)) best = p; // strict >: earlier copy holds
   }
   return best!.seat;
 }

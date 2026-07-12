@@ -55,5 +55,7 @@ export const CreateRoomSchema = z.object({
   seatAssignment: z.enum(["random", "host-arranged"]).default("random"),
   turnTimerMs: z.number().int().min(5000).default(30000),
   graceMs: z.number().int().min(1000).default(15000),
+  deckCount: z.union([z.literal(1), z.literal(2)]).default(1), // GAME_SPEC v2.0 §16; 2 → 6–7 players (validated at start)
+  calledCount: z.number().int().min(1).max(3).optional(), // 2-deck only; default 2
 }).strict();
 export const JoinRoomSchema = z.object({ code: z.string().length(6) }).strict();

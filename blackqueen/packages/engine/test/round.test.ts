@@ -103,10 +103,10 @@ describe("CALL_CARDS validation (§9.2)", () => {
 describe("REVEAL-001/002 — atomic reveal (§9.3)", () => {
   it("declarer seeded at CALL_CARDS; holder revealed only when card played, atomically", () => {
     let s = setupTrickPlay();
-    // Before any play: every view shows {0}; holder (seat1) additionally sees itself
+    // Before any play: EVERY view shows exactly {0} (claim model: membership = public claim record)
     expect(playerView(s, 0).revealedTeamMembers).toEqual([0]);
     expect(playerView(s, 2).revealedTeamMembers).toEqual([0]);
-    expect(playerView(s, 1).revealedTeamMembers).toEqual([0, 1]); // own membership
+    expect(playerView(s, 1).revealedTeamMembers).toEqual([0]); // CLAIM model: no membership exists pre-claim, even for the holder
     expect(playerView(s, 1).allPartnersRevealed).toBe(false);
 
     // Drive until seat1 plays QS (spades led by declarer forces it eventually; use timeouts)
@@ -238,5 +238,71 @@ describe("Full-game smoke — N rounds to GAME_END with competition ranks", () =
     }
     expect(s.phase).toBe("GAME_END");
     expect(s.roundNumber).toBe(8);
+  });
+});
+
+describe("CLAIM-001/002 — 2-deck claim model (TEST_CASES §11)", () => {
+  function setup2Deck(): GameState {
+    let s = initGame(6, 2, 0, 2); // 6 players, 2 decks, C=2 default
+    s = ok(s, { type: "START_ROUND", seed, abandonedSeats: [] }).state;
+    let guard = 0;
+    while (s.phase === "BIDDING" && guard++ < 12) s = ok(s, { type: "PASS", seat: s.round!.turnSeat! }).state;
+    expect(s.round!.Y).toBe(150); // standing bid = totalPoints/2
+    s = ok(s, { type: "CHOOSE_TRUMP", seat: 0, suit: "S" }).state;
+    s = ok(s, { type: "CALL_CARDS", seat: 0, cards: [c("AC"), c("KH")] }).state;
+    return s;
+  }
+
+  it("first copy claims atomically; second copy of a claimed card is silent; exactly C claims per round", () => {
+    let s = setup2Deck();
+    expect(s.round!.claimedBy).toEqual([null, null]);
+    // pre-claim: NO view shows any member beyond the declarer (claim model)
+    for (let seat = 0; seat < 6; seat++) expect(playerView(s, seat).revealedTeamMembers).toEqual([0]);
+
+    const claimed = new Set<string>();
+    let claims = 0;
+    let secondCopySilent = true;
+    let plays = 0;
+    let guard = 0;
+    while (s.phase === "TRICK_PLAY" && guard++ < 300) {
+      const r = ok(s, { type: "TIMEOUT" });
+      for (const e of r.events) {
+        if (e.kind === "CARD_PLAYED") {
+          plays++;
+          const k = cardKey(e.card);
+          const wasClaimed = claimed.has(k);
+          const revealNow = r.events.some((x) => x.kind === "PARTNER_REVEALED" && cardKey((x as any).card) === k);
+          if (wasClaimed && revealNow) secondCopySilent = false;
+        }
+        if (e.kind === "PARTNER_REVEALED") { claims++; claimed.add(cardKey((e as any).card)); }
+      }
+      s = r.state;
+    }
+    expect(s.phase === "ROUND_END" || s.phase === "GAME_END").toBe(true);
+    expect(plays).toBe(102); // every card of the trimmed double deck is played
+    expect(claims).toBe(2); // exactly C claims — never one per copy
+    expect(secondCopySilent).toBe(true);
+    expect(s.round!.capturedPoints.reduce((a, b) => a + b, 0)).toBe(300);
+    // scoring: only declarer + claimants carry deltas; defenders exactly 0
+    const team = new Set([0, ...s.round!.claimedBy.map((x) => x!)]);
+    s.lastRoundResult!.roundDelta.forEach((d, seat) => {
+      if (team.has(seat)) expect(d).not.toBe(0);
+      else expect(d).toBe(0);
+    });
+  });
+
+  it("duplicate identities rejected in CALL_CARDS; one-copy-per-play removal", () => {
+    let s = initGame(6, 2, 0, 2);
+    s = ok(s, { type: "START_ROUND", seed, abandonedSeats: [] }).state;
+    let guard = 0;
+    while (s.phase === "BIDDING" && guard++ < 12) s = ok(s, { type: "PASS", seat: s.round!.turnSeat! }).state;
+    s = ok(s, { type: "CHOOSE_TRUMP", seat: 0, suit: "S" }).state;
+    expect(applyAction(s, { type: "CALL_CARDS", seat: 0, cards: [c("AC"), c("AC")] }).ok).toBe(false); // same identity twice
+    s = ok(s, { type: "CALL_CARDS", seat: 0, cards: [c("AC"), c("KH")] }).state;
+    // a hand holding two identical cards loses exactly ONE per play (the empty-hand bug guard)
+    const total = () => s.round!.hands.flat().length + s.round!.completedTricks.length * 6 + s.round!.currentTrick.length;
+    const before = total();
+    s = ok(s, { type: "TIMEOUT" }).state; // one auto-play
+    expect(total()).toBe(before); // conservation: 102 cards accounted for at all times
   });
 });

@@ -25,38 +25,49 @@ export function pointValue(c: Card): number {
   return 0;
 }
 
-export const TOTAL_POINTS = 150; // invariant, §3/§5
+export const TOTAL_POINTS = 150; // per deck, §3/§5
+export const totalPoints = (deckCount: number): number => TOTAL_POINTS * deckCount;
 
-/** §3 deterministic trim: lowest ranks first, one card per suit, ♣→♦→♥→♠, until divisible. */
-export function trimmedDeckSize(playerCount: number): number {
-  let size = 52;
+/** §3 deterministic trim: lowest ranks first, ONE COPY per suit per pass, ♣→♦→♥→♠;
+ *  repeat passes over a rank while copies remain (2-deck), then next rank, until divisible. */
+export function trimmedDeckSize(playerCount: number, deckCount = 1): number {
+  let size = 52 * deckCount;
   while (size % playerCount !== 0) size--;
   return size;
 }
 
-export function removedCards(playerCount: number): Card[] {
-  const toRemove = 52 - trimmedDeckSize(playerCount);
+/** Removed card COPIES (an identity may appear twice in 2-deck trims, e.g. both 2♣ at 7p). */
+export function removedCards(playerCount: number, deckCount = 1): Card[] {
+  const toRemove = 52 * deckCount - trimmedDeckSize(playerCount, deckCount);
   const out: Card[] = [];
   outer: for (const rank of RANKS) {
-    for (const suit of SUITS) {
-      if (out.length >= toRemove) break outer;
-      if (pointValue({ suit, rank }) > 0) throw new Error("trim reached a point card"); // §3 invariant guard
-      out.push({ suit, rank });
+    for (let copy = 0; copy < deckCount; copy++) { // §3: per-copy passes within a rank
+      for (const suit of SUITS) {
+        if (out.length >= toRemove) break outer;
+        if (pointValue({ suit, rank }) > 0) throw new Error("trim reached a point card"); // §3 invariant guard
+        out.push({ suit, rank });
+      }
     }
   }
   return out;
 }
 
-/** §3.1 step 1: canonical order — suit-major ♣<♦<♥<♠, rank ascending — over the trimmed set. */
-export function canonicalDeck(playerCount: number): Card[] {
-  const removed = new Set(removedCards(playerCount).map(cardKey));
+/** §3.1 step 1: canonical order — suit ♣<♦<♥<♠, rank ascending, copy index ascending
+ *  (copies consecutive) — over the trimmed set. Locked by KAT-001 (1 deck) / KAT-002 (2 decks). */
+export function canonicalDeck(playerCount: number, deckCount = 1): Card[] {
+  const removedCount = new Map<string, number>();
+  for (const c of removedCards(playerCount, deckCount)) {
+    removedCount.set(cardKey(c), (removedCount.get(cardKey(c)) ?? 0) + 1);
+  }
   const deck: Card[] = [];
   for (const suit of SUITS) for (const rank of RANKS) {
     const c = { suit, rank };
-    if (!removed.has(cardKey(c))) deck.push(c);
+    const copies = deckCount - (removedCount.get(cardKey(c)) ?? 0);
+    for (let i = 0; i < copies; i++) deck.push({ suit, rank });
   }
   return deck;
 }
 
-/** §9.2: called-card count by player size. */
-export const calledCardCount = (playerCount: number): number => (playerCount <= 5 ? 1 : 2);
+/** §9.2: default called-card count. Single-deck: fixed by player size. 2-deck default: 2 (creator may pick 1–3, §16). */
+export const calledCardCount = (playerCount: number, deckCount = 1): number =>
+  deckCount === 2 ? 2 : playerCount <= 5 ? 1 : 2;

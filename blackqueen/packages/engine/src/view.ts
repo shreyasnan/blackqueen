@@ -12,6 +12,9 @@ export interface ClientView {
   viewerSeat: number;
   playerCount: number;
   N: number;
+  deckCount: number; // 1 | 2 (§16) — public
+  totalPoints: number; // 150 × deckCount (§5) — public
+  calledCount: number; // C (§9.2/§16) — public
   roundNumber: number;
   phase: WirePhase;
   ownHand: Card[];
@@ -46,11 +49,9 @@ export function playerView(state: GameState, viewerSeat: number): ClientView {
     state.phase === "TRUMP_SELECTION" || state.phase === "CALLING_PARTNERS" ? "DECLARER_SETUP" : state.phase;
   void isDeclarer;
 
+  // CLAIM model (§9.3): membership IS the public claim record — nothing viewer-specific to add.
+  // (A 1-deck holder's private "I will be the partner" knowledge is client-derivable from ownHand.)
   const revealed = r ? [...r.revealedTeamMembers] : [];
-  // §14.2: a viewer always sees their own membership
-  if (r && r.calledCardHolders.includes(viewerSeat) && !revealed.includes(viewerSeat)) {
-    revealed.push(viewerSeat);
-  }
 
   const roundEnded = state.phase === "ROUND_END" || state.phase === "GAME_END";
 
@@ -58,6 +59,9 @@ export function playerView(state: GameState, viewerSeat: number): ClientView {
     viewerSeat,
     playerCount: state.playerCount,
     N: state.N,
+    deckCount: state.deckCount,
+    totalPoints: state.totalPoints,
+    calledCount: state.calledCount,
     roundNumber: state.roundNumber,
     phase,
     ownHand: r ? r.hands[viewerSeat]!.slice() : [],

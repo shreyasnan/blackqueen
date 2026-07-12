@@ -5,7 +5,7 @@ import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-19-no-emote-button"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-20-two-decks"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -131,6 +131,8 @@ function Home({ auth }: { auth: AuthState }) {
   const [face, setFace] = useState(initial.face);
   const [nick, setNick] = useState(initial.nick);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [deckCount, setDeckCount] = useState<1 | 2>(1);
+  const [calledCount, setCalledCount] = useState(2);
   const identity = () => {
     const n = nick.trim().slice(0, 20) || auth.name;
     saveProfile(face, n);
@@ -171,11 +173,35 @@ function Home({ auth }: { auth: AuthState }) {
         )}
       </div>
 
+      {/* v2.0: deck mode at creation */}
+      <div style={{ background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 12, padding: 12, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, color: "var(--ink-soft)", marginBottom: 8 }}>TABLE RULES</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={() => setDeckCount(1)} style={{ ...(deckCount === 1 ? btn : btnSec), padding: "8px 14px" }}>1 deck · 150 pts</button>
+          <button onClick={() => setDeckCount(2)} style={{ ...(deckCount === 2 ? btn : btnSec), padding: "8px 14px" }}>2 decks · 300 pts</button>
+          {deckCount === 2 && (
+            <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+              partner cards:
+              {[1, 2, 3].map((n) => (
+                <button key={n} onClick={() => setCalledCount(n)}
+                  style={{ ...(calledCount === n ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>{n}</button>
+              ))}
+            </span>
+          )}
+        </div>
+        {deckCount === 2 && (
+          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
+            two of every card · needs <b>6–7 players</b> · the <b>first player to play</b> a called card becomes the partner
+            {calledCount === 3 && <span style={{ color: "var(--coral)", fontWeight: 700 }}> · 3 partner cards = big swings (±4× the bid)</span>}
+          </div>
+        )}
+      </div>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <button style={{ ...btn, padding: "14px" }} onClick={async () => {
           try {
             const me = identity();
-            const r = await api<{ roomId: string; code: string }>("/api/rooms", { N: 8, ...me });
+            const r = await api<{ roomId: string; code: string }>("/api/rooms", { N: 8, deckCount, ...(deckCount === 2 ? { calledCount } : {}), ...me });
             setRoomInfo({ roomId: r.roomId, code: r.code, members: [{ accountId: auth.accountId, displayName: me.displayName, avatar: me.avatar }], host: auth.accountId });
             setScreen("lobby");
           } catch (e) { pushToast(String(e)); }
@@ -207,7 +233,7 @@ function Lobby({ auth }: { auth: AuthState }) {
       try {
         const s = await api<any>(`/api/rooms/${roomInfo.roomId}/state`);
         if (s.phase !== "OPEN") { clearInterval(t); connect(roomInfo.roomId); return; }
-        setRoomInfo({ ...roomInfo, members: s.members, host: s.host, code: s.code });
+        setRoomInfo({ ...roomInfo, members: s.members, host: s.host, code: s.code, deckCount: s.deckCount, calledCount: s.calledCount } as any);
       } catch { /* transient */ }
     }, 2000);
     return () => clearInterval(t);
@@ -242,7 +268,10 @@ function Lobby({ auth }: { auth: AuthState }) {
           </span>
         ))}
       </div>
-      <p style={{ color: "var(--ink-soft)", marginBottom: 10 }}>{roomInfo.members.length} / 4–7 players</p>
+      <p style={{ color: "var(--ink-soft)", marginBottom: 10 }}>
+        {roomInfo.members.length} / {(roomInfo as any).deckCount === 2 ? "6–7" : "4–7"} players
+        {(roomInfo as any).deckCount === 2 && <b style={{ color: "var(--gold)" }}> · 2 decks · 300 pts · {(roomInfo as any).calledCount ?? 2} partner card{((roomInfo as any).calledCount ?? 2) > 1 ? "s" : ""}</b>}
+      </p>
       {isHost && (
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button style={btnSec} disabled={roomInfo.members.length >= 7}

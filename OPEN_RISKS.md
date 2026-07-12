@@ -63,6 +63,16 @@ The v1.7 docs allowed `PAUSED` "on reconnect grace" / "operator hold," which com
 - **Narrow residual (accepted):** a **host who is also the current declarer** and is far enough ahead can still stall→pause→end to *truncate the game early*, paying `−(S×Y)` but denying the table its remaining rounds. It is costly, fully visible (everyone sees who stalled and who ended), and self-limiting socially. Mitigation would need a non-host end policy (vote quorum / idle auto-end, D8). **Accepted for v1.**
 - **Trigger to revisit:** any playtest occurrence, or implementation of D8's quorum policy.
 
+### R13 — Claim-timing meta (2-deck) — **by design, watch in playtests**
+Under the claim model (`GAME_SPEC.md` §9.3), a copy-holder chooses when to play their copy: rush it to lock membership with a strong declarer, or stall hoping the other copy claims first. Follow-suit obligations limit stalling (you may be forced to play it), and timeout auto-play can claim for you.
+- **Status:** intended strategy — it IS the 2-deck game. Risk: optimal play may favor extreme hoarding of copies, flattening the drama.
+- **Trigger to revisit:** playtests where copies are systematically held to the last legal moment.
+
+### R14 — Tie-rule learnability (2-deck) — **accepted, UI-mitigated**
+"First-played copy wins" surprises players who assume the later identical card matters. Veterans gain an edge over newcomers.
+- **Mitigation:** the UI visually slides the losing copy UNDER the winning one and the feed says "second ♠K — first one holds"; the coach layer (future) should call it out once.
+- **Status:** accepted; standard convention in double-deck card games.
+
 ### R8 — Host seed exploit — **closed in v1**
 Earlier ambiguity let one reading have the host set the shuffle seed (→ precompute all hands).
 - **Status:** **closed**: the shuffle seed is server-only, per-round, never host-configurable or visible during play (`GAME_SPEC.md` §3.1). The LOBBY-configurable value is only `round1DefaultDeclarerSelection` (§16).
