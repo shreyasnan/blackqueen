@@ -5,7 +5,7 @@ import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-27-setup-leaderboard-deadrubber"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-28-lobby-rules-trump-declutter"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -131,9 +131,6 @@ function Home({ auth }: { auth: AuthState }) {
   const [face, setFace] = useState(initial.face);
   const [nick, setNick] = useState(initial.nick);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [deckCount, setDeckCount] = useState<1 | 2>(1);
-  const [calledCount, setCalledCount] = useState(2);
-  const [handSize, setHandSize] = useState<number | "all">("all"); // v2.1: "all" = deal the whole trimmed deck
   const identity = () => {
     const n = nick.trim().slice(0, 20) || auth.name;
     saveProfile(face, n);
@@ -179,60 +176,20 @@ function Home({ auth }: { auth: AuthState }) {
         )}
       </div>
 
-      {/* v2.0: deck mode at creation */}
-      <div style={{ background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 12, padding: 12, marginBottom: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, color: "var(--ink-soft)", marginBottom: 8 }}>TABLE RULES</div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button onClick={() => { setDeckCount(1); setHandSize("all"); }} style={{ ...(deckCount === 1 ? btn : btnSec), padding: "8px 14px" }}>1 deck · 150 pts</button>
-          <button onClick={() => { setDeckCount(2); setHandSize(12); }} style={{ ...(deckCount === 2 ? btn : btnSec), padding: "8px 14px" }}>2 decks · 300 pts</button>
-          {deckCount === 2 && (
-            <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
-              partner cards:
-              {[1, 2, 3].map((n) => (
-                <button key={n} onClick={() => setCalledCount(n)}
-                  style={{ ...(calledCount === n ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>{n}</button>
-              ))}
-            </span>
-          )}
-        </div>
-        {/* v2.1: creator-selectable hand size — extra cards are trimmed (low junk first, never point cards) */}
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 13, marginTop: 8 }}>
-          cards per hand:
-          {(deckCount === 2 ? [10, 11, 12, 13, 14] : [8, 9, 10]).map((n) => (
-            <button key={n} onClick={() => setHandSize(n)}
-              style={{ ...(handSize === n ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>{n}</button>
-          ))}
-          <button onClick={() => setHandSize("all")}
-            style={{ ...(handSize === "all" ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>whole deck</button>
-        </div>
-        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
-          {handSize !== "all"
-            ? <>extra cards are trimmed before the deal — lowest ranks first, <b>never point cards</b> (5s, 10s, Aces, Q♠), so the total stays {deckCount === 2 ? 300 : 150}. If the table can't fit {handSize}, the nearest legal size is used.</>
-            : <>every card is dealt — hand size depends on the player count.</>}
-        </div>
-        {deckCount === 2 && (
-          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
-            two of every card · needs <b>6–7 players</b> · the <b>first player to play</b> a called card becomes the partner
-            {calledCount === 3 && <span style={{ color: "var(--coral)", fontWeight: 700 }}> · 3 partner cards = big swings (±4× the bid)</span>}
-          </div>
-        )}
-      </div>
-
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <button style={{ ...btn, padding: "14px" }} onClick={async () => {
           try {
             const me = identity();
-            const r = await api<{ roomId: string; code: string }>("/api/rooms", {
-              N: 8, deckCount,
-              ...(deckCount === 2 ? { calledCount } : {}),
-              // "whole deck" = engine default for 1 deck; for 2 decks send 17 (server clamps to the table max)
-              ...(handSize !== "all" ? { handSize } : deckCount === 2 ? { handSize: 17 } : {}),
-              ...me,
-            });
+            // Create the room first (defaults: 1 deck). The host picks decks & partners in the lobby,
+            // once people have joined — so table rules aren't decided before anyone's here.
+            const r = await api<{ roomId: string; code: string }>("/api/rooms", { N: 8, ...me });
             setRoomInfo({ roomId: r.roomId, code: r.code, members: [{ accountId: auth.accountId, displayName: me.displayName, avatar: me.avatar }], host: auth.accountId });
             setScreen("lobby");
           } catch (e) { pushToast(String(e)); }
         }}>Create table</button>
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", textAlign: "center", marginTop: -2 }}>
+          you'll pick decks & partner cards in the lobby, after friends join
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="INVITE CODE" style={{ ...inp, letterSpacing: 3, flex: 1 }} />
           <button style={btnSec} onClick={async () => {
@@ -253,6 +210,17 @@ function Lobby({ auth }: { auth: AuthState }) {
   const setRoomInfo = useStore((s) => s.setRoomInfo);
   const pushToast = useStore((s) => s.pushToast);
   const [starting, setStarting] = useState(false);
+  // Table rules are now chosen in the lobby (host-only), seeded from the server config.
+  const [deckCount, setDeckCount] = useState<1 | 2>((((roomInfo as any)?.deckCount ?? 1)) as 1 | 2);
+  const [calledCount, setCalledCount] = useState<number>((roomInfo as any)?.calledCount ?? 2);
+  const [handSize, setHandSize] = useState<number | "all">((((roomInfo as any)?.handSize ?? "all")) as number | "all");
+  const pushConfig = async (deck: 1 | 2, called: number, hs: number | "all") => {
+    if (!roomInfo) return;
+    // "whole deck" = engine default for 1 deck; for 2 decks send 17 (server clamps to the table max)
+    const body = { deckCount: deck, calledCount: deck === 2 ? called : null, handSize: hs !== "all" ? hs : deck === 2 ? 17 : null };
+    setRoomInfo({ ...roomInfo, deckCount: deck, calledCount: body.calledCount, handSize: body.handSize } as any); // optimistic
+    try { await api(`/api/rooms/${roomInfo.roomId}/config`, body); } catch (e) { pushToast(`Couldn't update rules: ${e instanceof Error ? e.message : e}`); }
+  };
 
   useEffect(() => {
     if (!roomInfo) return;
@@ -307,6 +275,50 @@ function Lobby({ auth }: { auth: AuthState }) {
         {(roomInfo as any).deckCount === 2 && <b style={{ color: "var(--gold)" }}> · 2 decks · 300 pts · {(roomInfo as any).calledCount ?? 2} partner card{((roomInfo as any).calledCount ?? 2) > 1 ? "s" : ""}</b>}
         {(roomInfo as any).handSize != null && <> · <b>{(roomInfo as any).handSize} cards each</b> (clamped to the table if needed)</>}
       </p>
+
+      {/* Table rules — host picks decks & partners here, in the lobby, once people have joined */}
+      {isHost ? (
+        <div style={{ background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 12, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, color: "var(--ink-soft)", marginBottom: 8 }}>TABLE RULES</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button onClick={() => { setDeckCount(1); setHandSize("all"); pushConfig(1, calledCount, "all"); }} style={{ ...(deckCount === 1 ? btn : btnSec), padding: "8px 14px" }}>1 deck · 150 pts</button>
+            <button onClick={() => { const hs = handSize === "all" ? 12 : handSize; setDeckCount(2); setHandSize(hs); pushConfig(2, calledCount, hs); }} style={{ ...(deckCount === 2 ? btn : btnSec), padding: "8px 14px" }}>2 decks · 300 pts</button>
+            {deckCount === 2 && (
+              <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+                partner cards:
+                {[1, 2, 3].map((n) => (
+                  <button key={n} onClick={() => { setCalledCount(n); pushConfig(2, n, handSize); }}
+                    style={{ ...(calledCount === n ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>{n}</button>
+                ))}
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 13, marginTop: 8 }}>
+            cards per hand:
+            {(deckCount === 2 ? [10, 11, 12, 13, 14] : [8, 9, 10]).map((n) => (
+              <button key={n} onClick={() => { setHandSize(n); pushConfig(deckCount, calledCount, n); }}
+                style={{ ...(handSize === n ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>{n}</button>
+            ))}
+            <button onClick={() => { setHandSize("all"); pushConfig(deckCount, calledCount, "all"); }}
+              style={{ ...(handSize === "all" ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>whole deck</button>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
+            {handSize !== "all"
+              ? <>extra cards are trimmed before the deal — lowest ranks first, <b>never point cards</b> (5s, 10s, Aces, Q♠), so the total stays {deckCount === 2 ? 300 : 150}. If the table can't fit {handSize}, the nearest legal size is used.</>
+              : <>every card is dealt — hand size depends on the player count.</>}
+          </div>
+          {deckCount === 2 && (
+            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
+              two of every card · needs <b>6–7 players</b> · the <b>first player to play</b> a called card becomes the partner
+              {calledCount === 3 && <span style={{ color: "var(--coral)", fontWeight: 700 }}> · 3 partner cards = big swings (±4× the bid)</span>}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 12 }}>
+          the host sets the table rules — waiting on them to choose decks & partners.
+        </div>
+      )}
       {isHost && (
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button style={btnSec} disabled={roomInfo.members.length >= 7}

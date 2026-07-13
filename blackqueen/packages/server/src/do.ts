@@ -82,6 +82,13 @@ export class RoomDO implements DurableObject {
         this.armTurnAlarm();
         return json({ ok: true });
       }
+      case "/config": {
+        const body = await req.json().catch(() => ({})) as { deckCount?: number; calledCount?: number | null; handSize?: number | null };
+        const r = this.core.setConfig(accountId, body);
+        if (!r.ok) return json({ error: r.error }, 400);
+        // Lobby members see the new rules on their next /state poll (no live sockets before START).
+        return json({ deckCount: this.core.config.deckCount, calledCount: this.core.config.calledCount ?? null, handSize: this.core.config.handSize ?? null });
+      }
       case "/addbot": {
         const r = this.core.addBot(accountId);
         if (!r.ok) return json({ error: r.error }, 400);

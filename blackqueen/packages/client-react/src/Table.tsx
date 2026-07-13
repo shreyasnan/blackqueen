@@ -123,7 +123,6 @@ export function Table() {
           <PokerTable view={view} bubbles={bubbles} />
           {/* ---- your controls + hand below the rail ---- */}
           <MyArea view={view} isHost={isHost} hideNext={overlay?.type === "round"} />
-          {!wide && <BottomDrawer view={view} />}
         </div>
         {wide && <ActivitySidebar view={view} isHost={isHost} />}
       </div>
@@ -1240,40 +1239,7 @@ function ActivitySidebar({ view: v, isHost }: { view: ExtendedView; isHost: bool
         <div style={{ fontWeight: 800, fontSize: 15, margin: "3px 0" }}>{now.title}</div>
         <div style={{ fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.45 }}>{now.detail}</div>
       </div>
-      <div style={{ flex: 1, minHeight: 0, background: "rgba(255,253,247,.6)", border: "1px solid rgba(59,34,71,.12)", borderRadius: 12, padding: "8px 10px", display: "flex", flexDirection: "column" }}>
-        <div style={{ fontSize: 10.5, fontWeight: 900, letterSpacing: 1.2, color: "var(--ink-soft)", marginBottom: 4 }}>ACTIVITY</div>
-        <ActivityFeed view={v} />
-      </div>
       <ScoresMini view={v} />
-    </div>
-  );
-}
-
-const FEED_ICON: Record<string, string> = {
-  ROUND_STARTED: "🎴", BID_PLACED: "📢", PLAYER_PASSED: "—", AUCTION_ENDED: "♛", TRUMP_CHOSEN: "🂠",
-  CARDS_CALLED: "📜", CARD_PLAYED: "▸", PARTNER_REVEALED: "⭐", TRICK_WON: "🏆", ROUND_SCORED: "∑",
-  PAUSED: "⏸", RESUMED: "▶", ROTATION_SKIPPED: "↷", GAME_ENDED: "🏁",
-};
-
-function ActivityFeed({ view: v }: { view: ExtendedView }) {
-  const events = useStore((s) => s.events);
-  const line = feedLine(v);
-  return (
-    <div aria-live="polite" style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 3 }}>
-      {[...events].reverse().map((e) => {
-        const l = line(e);
-        if (!l) return null;
-        const big = e.kind === "PARTNER_REVEALED" || e.kind === "ROUND_SCORED" || e.kind === "AUCTION_ENDED";
-        return (
-          <div key={e.seq} style={{
-            fontSize: 12, lineHeight: 1.4, padding: big ? "4px 6px" : "1px 2px", borderRadius: 6,
-            background: e.kind === "PARTNER_REVEALED" ? "rgba(201,153,46,.18)" : e.kind === "ROUND_SCORED" ? "rgba(46,111,94,.12)" : "transparent",
-            fontWeight: big ? 700 : 400, color: big ? "var(--ink)" : "var(--ink-soft)",
-          }}>
-            <span style={{ display: "inline-block", width: 16, textAlign: "center" }}>{FEED_ICON[e.kind] ?? "·"}</span> {l}
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -1308,84 +1274,7 @@ function ScoresMini({ view: v }: { view: ExtendedView }) {
   );
 }
 
-/** Shared feed-line formatter (sidebar + mobile drawer). */
-function feedLine(v: ExtendedView | null) {
-  const isYou = (s: number) => v !== null && s === v.viewerSeat;
-  const name = (s: number) => (v ? (isYou(s) ? "You" : firstName(v, s)) : `seat ${s}`);
-  // verb agreement: "You play / Chip plays" — 'You plays' is the kind of detail that breaks the spell
-  const verb = (s: number, first: string, third: string) => (isYou(s) ? first : third);
-  return (e: GameEvent): string | null => {
-    const d = e.data ?? {};
-    switch (e.kind) {
-      case "ROUND_STARTED": return `Round ${d.roundNumber} — ${name(d.defaultDeclarerSeat)} ${verb(d.defaultDeclarerSeat, "open", "opens")} the bidding at 75`;
-      case "BID_PLACED": return `${name(d.seat)} ${verb(d.seat, "bid", "bids")} ${d.value}${d.value >= 150 ? "(!!)" : ""}`;
-      case "PLAYER_PASSED": return d.auto ? `${name(d.seat)} dozed — auto-pass` : `${name(d.seat)} ${verb(d.seat, "pass", "passes")}`;
-      case "AUCTION_ENDED": return `${name(d.declarerSeat)} ${verb(d.declarerSeat, "win", "wins")} the bid at ${d.Y}`;
-      case "TRUMP_CHOSEN": return `Trump: ${GLYPH[d.suit]}`;
-      case "CARDS_CALLED": return v && (v.deckCount ?? 1) === 2
-        ? `Called: ${d.cards.map((c: Card) => ck(c)).join(" ")} — first to play one joins the team`
-        : `Called: ${d.cards.map((c: Card) => ck(c)).join(" ")} — someone is secretly on the team`;
-      case "CARD_PLAYED": return `${name(d.seat)} ${verb(d.seat, "play", "plays")} ${ck(d.card)}${isQS(d.card) ? " — thirty points of trouble" : ""}${d.auto ? " (auto)" : ""}`;
-      case "PARTNER_REVEALED": return `${name(d.seat)} ${verb(d.seat, "are", "is")} with the declarer! (${ck(d.card)})`;
-      case "TRICK_WON": return `${name(d.winnerSeat)} ${verb(d.winnerSeat, "take", "takes")} the hand${d.points ? ` (+${d.points})` : ""}`;
-      case "ROUND_SCORED": return d.success ? `Bid MADE with ${d.declarerTeamPoints}` : `Bid FAILED at ${d.declarerTeamPoints}`;
-      case "GAME_ENDED": return `Game over`;
-      case "PAUSED": return `Paused — waiting on the declarer or host`;
-      case "RESUMED": return `Play resumes`;
-      case "ROTATION_SKIPPED": return `Rotation skipped a sleeping seat`;
-      default: return null;
-    }
-  };
-}
-
-/* ------------------------------ drawer: totals + team bar + history ------------------------------ */
-function BottomDrawer({ view: v }: { view: ExtendedView }) {
-  const [open, setOpen] = useState(false);
-  // team chase is meaningful as soon as the contract exists — declarer side pts are public by claim
-  const teamPts = v.revealedTeamMembers.length > 0 ? v.revealedTeamMembers.reduce((a, s) => a + (v.perPlayerCapturedPoints[s] ?? 0), 0) : null;
-  return (
-    <div style={{ borderTop: "1.5px solid rgba(59,34,71,.15)", paddingTop: 4 }}>
-      {/* mobile review #5: six tiny "avatar 0" chips were noise. One meaningful line instead:
-          the team chase once the contract exists, else the score leaders; full scores live in history. */}
-      <div onClick={() => setOpen((x) => !x)}
-        style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "center", fontSize: 13, cursor: "pointer", padding: "2px 0" }}>
-        {v.Y !== null && teamPts !== null ? (
-          <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontWeight: 800, color: "var(--coral)" }}>team {teamPts}/{v.Y}</span>
-            <div style={{ width: 110, height: 8, background: "rgba(59,34,71,.15)", borderRadius: 4, overflow: "hidden" }}>
-              <motion.div animate={{ width: `${Math.min(100, (teamPts / v.Y) * 100)}%` }}
-                style={{ height: "100%", background: teamPts >= v.Y ? "var(--teal)" : "var(--gold)" }} />
-            </div>
-          </motion.div>
-        ) : (() => {
-          const any = v.totalScore.some((t) => t !== 0) || v.perPlayerCapturedPoints.some((p) => p > 0);
-          if (!any) return <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>scores appear here</span>;
-          const lead = v.totalScore.map((t, s) => ({ t: t + (v.perPlayerCapturedPoints[s] ?? 0) * 0, s, cap: v.perPlayerCapturedPoints[s] ?? 0 }))
-            .sort((a, b) => b.t - a.t || b.cap - a.cap).slice(0, 2);
-          return lead.map(({ s, t, cap }) => (
-            <span key={s} style={{ color: "var(--ink-soft)" }}>
-              <Face id={faceOf(v, s)} size={17} /> {s === v.viewerSeat ? "you" : firstName(v, s)} <b style={{ color: t < 0 ? "var(--coral)" : "var(--ink)" }}>{t}</b>
-              {cap > 0 && <span style={{ fontSize: 11 }}> (+{cap})</span>}
-            </span>
-          ));
-        })()}
-        <span style={{ color: "var(--ink)", opacity: 0.75, fontSize: 12, fontWeight: 700 }}>{open ? "▾ hide history" : "▸ history"}</span>
-      </div>
-      {open && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", fontSize: 12.5, padding: "3px 0" }}>
-          {v.totalScore.map((t, s) => (
-            <span key={s} style={{ color: "var(--ink-soft)" }}>
-              <Face id={faceOf(v, s)} size={16} /> <b style={{ color: t < 0 ? "var(--coral)" : "var(--ink)" }}>{t}</b>
-              {(v.perPlayerCapturedPoints[s] ?? 0) > 0 && <span style={{ fontSize: 11 }}> +{v.perPlayerCapturedPoints[s]}</span>}
-            </span>
-          ))}
-        </div>
-      )}
-      {open && <EventLog />}
-    </div>
-  );
-}
-
+// (Activity feed + mobile history drawer removed by request — the leaderboard button covers scores.)
 // (EmoteBar removed by request — the EMOTE transport stays server-side; bubbles still render if ever re-enabled.)
 
 /* ------------------------------ theater ------------------------------ */
@@ -1514,7 +1403,9 @@ function OverlayContent({ overlay, view: v, onDismiss }: { overlay: NonNullable<
       return (
         <div>
           <div style={{ fontSize: 15, color: "var(--ink-soft)" }}>The bid is set</div>
-          <div style={{ fontSize: 34, margin: "4px 0", color: red(overlay.trump) ? "var(--coral)" : "var(--ink)" }}>{GLYPH[overlay.trump]} trump</div>
+          <div style={{ fontSize: 28, margin: "4px 0", color: red(overlay.trump) ? "var(--coral)" : "var(--ink)" }}>
+            <b>{SUIT_WORD[overlay.trump]}</b> {GLYPH[overlay.trump]} <span style={{ fontSize: 16, color: "var(--ink-soft)" }}>is trump</span>
+          </div>
           <div style={{ fontSize: 18 }}>calling {overlay.cards.map((c, i) => <b key={i} style={{ color: red(c.suit) ? "var(--coral)" : "var(--ink)", margin: "0 4px" }}>{ck(c)}</b>)}</div>
           <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 6 }}>someone at this table just became a secret partner…</div>
         </div>
@@ -1792,17 +1683,6 @@ function GameEnd({ view: v }: { view: ExtendedView }) {
 }
 
 /* ------------------------------ log & misc ------------------------------ */
-function EventLog() {
-  const events = useStore((s) => s.events);
-  const view = useStore((s) => s.view);
-  const line = feedLine(view);
-  return (
-    <div aria-live="polite" style={{ maxHeight: 120, overflowY: "auto", fontSize: 12, color: "var(--ink-soft)", padding: "4px 8px" }}>
-      {[...events].reverse().map((e) => { const l = line(e); return l ? <div key={e.seq}>{l}</div> : null; })}
-    </div>
-  );
-}
-
 function Toasts({ toasts }: { toasts: { id: number; text: string }[] }) {
   return (
     <div style={{ position: "fixed", bottom: 70, left: 0, right: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, pointerEvents: "none", zIndex: 60 }}>

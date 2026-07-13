@@ -100,6 +100,30 @@ export class RoomCore {
     return this.inviteCode;
   }
 
+  /** Host adjusts table rules while still in the lobby (before START). Deferred here from create-time
+   *  so the creator can open a room and let people join first, then pick decks/partners. */
+  setConfig(accountId: string, patch: { deckCount?: number; calledCount?: number | null; handSize?: number | null }): { ok: boolean; error?: string } {
+    if (this.phase !== "OPEN") return { ok: false, error: "game already started" };
+    if (accountId !== this.hostAccountId) return { ok: false, error: "host only" };
+    if (patch.deckCount !== undefined) {
+      if (patch.deckCount !== 1 && patch.deckCount !== 2) return { ok: false, error: "deckCount must be 1 or 2" };
+      this.config.deckCount = patch.deckCount;
+    }
+    if ("calledCount" in patch) {
+      const cc = patch.calledCount;
+      if (cc === null || cc === undefined) this.config.calledCount = undefined;
+      else if (!Number.isInteger(cc) || cc < 1 || cc > 3) return { ok: false, error: "calledCount must be 1-3" };
+      else this.config.calledCount = cc;
+    }
+    if ("handSize" in patch) {
+      const hs = patch.handSize;
+      if (hs === null || hs === undefined) this.config.handSize = undefined;
+      else if (!Number.isInteger(hs)) return { ok: false, error: "handSize must be an integer" };
+      else this.config.handSize = hs;
+    }
+    return { ok: true };
+  }
+
   join(code: string, accountId: string, displayName: string, avatar?: string): { ok: boolean } {
     // Uniform failure — never distinguish wrong/expired/full/in-game (§3.3)
     if (this.phase !== "OPEN" || code !== this.inviteCode) return { ok: false };

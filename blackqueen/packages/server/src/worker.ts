@@ -196,7 +196,7 @@ export default {
         if (!roomId) return new Response(JSON.stringify({ error: "invalid or expired code" }), { status: 404 }); // uniform
         return toDO(env, roomId, "/join", req, id, body?.displayName, body?.avatar);
       }
-      const m = url.pathname.match(/^\/api\/rooms\/([0-9a-f]+)\/(ws|state|start|addbot|removebot|leave)$/);
+      const m = url.pathname.match(/^\/api\/rooms\/([0-9a-f]+)\/(ws|state|start|addbot|removebot|leave|config)$/);
       if (m) return toDO(env, m[1]!, `/${m[2]}`, req, id);
       return new Response("not found", { status: 404 });
     }
