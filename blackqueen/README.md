@@ -37,9 +37,15 @@ One-time secret for guest play: `npx wrangler secret put GUEST_SECRET` (any long
 3. **Clerk webhook:** point `user.deleted` + session revocation at `/api/webhooks/clerk` (handler is a stub — wire Svix verification + socket-close before public launch, PLATFORM_SPEC §1.2/§2.2).
 4. **CI:** run `npm test` plus the same suite under `@cloudflare/vitest-pool-workers` so KAT-001 is asserted on workerd (PLATFORM_SPEC §7 determinism caveat).
 
+## Auth hardening (worker.ts)
+
+- **JWT verification** enforces `alg=RS256`, signature, issuer (`iss` must equal the JWKS URL origin), presence + validity of `exp`, and `nbf`/`iat`/`sub` sanity, all with 60s skew. Set `CLERK_AUTHORIZED_PARTY` in `wrangler.toml` to additionally pin the `azp` claim.
+- **Guest tokens** require `GUEST_SECRET`. There is **no** baked-in fallback in prod — if it is unset, `/api/guest` returns 503 and guest tokens won't verify (a fixed dev key is used only under `DEV_AUTH=1`). HMAC comparison is constant-time.
+- **Clerk webhook** now verifies the Svix signature (`svix-id`/`svix-timestamp`/`svix-signature` over the raw body using `CLERK_WEBHOOK_SECRET`, ±5min replay window, constant-time compare); forged/unsigned POSTs get 401. The **action** on `user.deleted` / session revocation (account cleanup + socket close) is still a follow-up — it needs DO-level session invalidation.
+
 ## Known v1 gaps (tracked, deliberate)
 
-- Clerk webhook handler is an acknowledging stub (P-item in OPEN_RISKS).
+- Clerk webhook is now Svix-verified, but the follow-up **action** (socket close / account cleanup) is still a stub (P-item in OPEN_RISKS).
 - Socket re-auth interval (PLATFORM_SPEC §2.2) not yet enforced server-side.
 - Client is functional-minimal; no animations/polish.
 - workerd-pool CI job not yet configured (tests currently run on Node; engine is runtime-agnostic pure TS).
