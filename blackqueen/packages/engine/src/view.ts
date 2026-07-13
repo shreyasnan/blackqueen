@@ -37,6 +37,7 @@ export interface ClientView {
   // ROUND_END / GAME_END only (§14.2: first disclosed in ROUND_SCORED):
   lastRoundDelta: number[] | null;
   lastRoundSuccess: boolean | null;
+  lastRoundEarlyEnd: boolean | null; // v2.3: round was auto-ended once its outcome was settled
 }
 
 export function playerView(state: GameState, viewerSeat: number): ClientView {
@@ -86,6 +87,7 @@ export function playerView(state: GameState, viewerSeat: number): ClientView {
     totalScore: state.totalScore.slice(),
     lastRoundDelta: roundEnded && state.lastRoundResult ? state.lastRoundResult.roundDelta.slice() : null,
     lastRoundSuccess: roundEnded && state.lastRoundResult ? state.lastRoundResult.success : null,
+    lastRoundEarlyEnd: roundEnded && state.lastRoundResult ? state.lastRoundResult.earlyEnd : null,
   };
 }
 

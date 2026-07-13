@@ -47,9 +47,14 @@ type Overlay =
   | { type: "reveal"; seat: number; card: Card; tier: "normal" | "final" | "solo" | "queen" }
   | { type: "contract"; trump: Suit; cards: Card[] }
   | { type: "crown"; seat: number; Y: number }
-  | { type: "slam"; seat: number }
+  | { type: "slam"; seat: number; value: number }
   | { type: "round"; success: boolean; pts: number; delta: number[]; solo?: boolean }
   | null;
+
+// #4: hold the round verdict until the final trick has visibly resolved, so the "BID MADE/FAILED"
+// modal doesn't slam over the last card played. The live event path schedules it after a short beat;
+// the state-derived (reconnect) path fills instantly, but stands down if a live verdict is scheduled.
+const ROUND_VERDICT_DELAY = 1500;
 
 function useWide(): boolean {
   const [wide, setWide] = useState(() => typeof matchMedia !== "undefined" && matchMedia("(min-width: 1020px)").matches);
@@ -69,26 +74,32 @@ export function Table() {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [bubbles, setBubbles] = useState<{ id: number; seat: number; text: string }[]>([]);
   const [burst, setBurst] = useState(0);
+  const [lbOpen, setLbOpen] = useState(false);
   const wide = useWide();
   useTheater(view, setOverlay, setBubbles, () => setBurst((b) => b + 1));
   const [, force] = useState(0);
   // Playtest #2 fix: the round verdict is DERIVED FROM STATE, not only from the live event —
   // reconnect/refresh/late-join during ROUND_END still shows the "BID MADE/FAILED" screen.
   const dismissedRound = useRef(0);
+  const shownRound = useRef(0);
+  // The round verdict is DERIVED FROM STATE (survives reconnect/refresh) and scheduled ONCE per round.
+  // #4: it's deferred ~1.5s so the final trick resolves on the felt before the modal covers it —
+  // a single source (this effect) drives sound + confetti + overlay, so there's no live/reconnect race.
   useEffect(() => {
     const v2 = view;
     if (!v2) return;
     const delta = v2.lastRoundDelta;
-    if (v2.phase === "ROUND_END" && delta && dismissedRound.current !== v2.roundNumber) {
-      setOverlay((o) => o ?? ({
-        type: "round",
-        success: v2.lastRoundSuccess ?? false,
-        pts: v2.revealedTeamMembers.reduce((s, seat) => s + (v2.perPlayerCapturedPoints[seat] ?? 0), 0),
-        delta,
-        solo: !(v2.lastRoundSuccess ?? false) && delta.filter((x) => x < 0).length === 1,
-      } as Overlay));
+    if (v2.phase === "ROUND_END" && delta && dismissedRound.current !== v2.roundNumber && shownRound.current !== v2.roundNumber) {
+      shownRound.current = v2.roundNumber;
+      const success = v2.lastRoundSuccess ?? false;
+      const pts = v2.revealedTeamMembers.reduce((s, seat) => s + (v2.perPlayerCapturedPoints[seat] ?? 0), 0);
+      const solo = !success && delta.filter((x) => x < 0).length === 1;
+      setTimeout(() => {
+        if (success) { sfx.made(); setBurst((b) => b + 1); } else sfx.failed();
+        setOverlay({ type: "round", success, pts, delta, solo });
+      }, ROUND_VERDICT_DELAY);
     }
-    if (v2.phase !== "ROUND_END" && dismissedRound.current !== v2.roundNumber) dismissedRound.current = 0;
+    if (v2.phase !== "ROUND_END") { if (dismissedRound.current !== v2.roundNumber) dismissedRound.current = 0; shownRound.current = 0; }
   }, [view]);
   if (!view) return <Center>Connecting…</Center>;
   const isHost = view.hostSeat === view.viewerSeat;
@@ -106,7 +117,7 @@ export function Table() {
     <Shell wide={wide}>
       <div style={{ display: "flex", gap: 12, flex: 1, minHeight: 0 }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          <HUD view={view} onMute={() => force((x) => x + 1)} />
+          <HUD view={view} onMute={() => force((x) => x + 1)} onLeaderboard={() => setLbOpen(true)} />
           <PartnerStatus view={view} />
           {/* ---- THE TABLE: top-down oval, seats around the rim, cards land in front of their player ---- */}
           <PokerTable view={view} bubbles={bubbles} />
@@ -117,6 +128,7 @@ export function Table() {
         {wide && <ActivitySidebar view={view} isHost={isHost} />}
       </div>
       <LastTrickModal view={view} />
+      <LeaderboardModal view={view} open={lbOpen} onClose={() => setLbOpen(false)} />
       <DeclarerSetupModal view={view} />
       <SetPiece overlay={overlay} view={view} onDismiss={() => { dismissedRound.current = view.roundNumber; setOverlay(null); }} />
       <Confetti burst={burst} />
@@ -147,6 +159,10 @@ const deadIdentities = (playerCount: number, deckCount: number, handSize?: numbe
   return [...removed.entries()].filter(([, n]) => n >= deckCount).map(([k]) => k);
 };
 const RANKS_DESC: Card["rank"][] = ["A", "K", "Q", "J", "10", "9", "8", "7", "6", "5", "4", "3", "2"];
+// #1: the partner picker only offers honors + point cards — calling a low pip is never meaningful,
+// and dropping them frees room for larger, high-contrast buttons.
+const RANKS_PICK: Card["rank"][] = ["A", "K", "Q", "J", "10", "5"];
+const suitTone = (suit: string) => (suit === "H" ? "#c73a3a" : suit === "D" ? "#d97b28" : "var(--ink)");
 
 /** U6: partner-card picks survive a PAUSE/resume (and a remount) within the same round. */
 const pickCache = new Map<number, Card[]>();
@@ -159,9 +175,12 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
   const setPicked = (fn: (ps: Card[]) => Card[]) =>
     setPickedRaw((ps) => { const next = fn(ps); pickCache.set(v.roundNumber, next); return next; });
   const open = v.phase === "DECLARER_SETUP" && v.declarerSeat === v.viewerSeat;
-  useEffect(() => { if (open) setPickedRaw(pickCache.get(v.roundNumber) ?? []); }, [open, v.roundNumber]);
+  // #1: two steps — pick trump, then pick partner card(s). Resume/refresh lands on the card step if trump is already staged.
+  const [step, setStep] = useState<1 | 2>(() => (stagedTrump ? 2 : 1));
+  useEffect(() => { if (open) { setPickedRaw(pickCache.get(v.roundNumber) ?? []); setStep(stagedTrump ? 2 : 1); } }, [open, v.roundNumber]);
   if (!open) return null;
 
+  const twoDeck = (v.deckCount ?? 1) === 2;
   const C = v.calledCount ?? (v.playerCount <= 5 ? 1 : 2);
   const trimmed = new Set(deadIdentities(v.playerCount, v.deckCount ?? 1, (v as any).handSize));
   const inHand = (c: Card) => v.ownHand.some((h) => h.rank === c.rank && h.suit === c.suit);
@@ -172,103 +191,154 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
       : ps.length >= C ? [...ps.slice(1), c] : [...ps, c]); // picking beyond C swaps the oldest
   };
 
+  // suggestion (#1): the highest-ranked callable card you DON'T hold — best odds of landing a real partner.
+  let suggested: Card | null = null;
+  outer: for (const r of RANKS_PICK) for (const s of SUITS) {
+    const c: Card = { suit: s, rank: r };
+    if (!trimmed.has(`${r}${s}`) && !inHand(c)) { suggested = c; break outer; }
+  }
+  const isSuggested = (c: Card) => !!suggested && suggested.rank === c.rank && suggested.suit === c.suit;
+
+  // risk (#5): each called card you hold a copy of adds a scoring share (declarer share + one per held call).
+  const heldCount = picked.filter(inHand).length;
+  const shares = 1 + heldCount;
+  const handSorted = [...v.ownHand].sort((a, b) =>
+    SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit) || RANKS_DESC.indexOf(a.rank) - RANKS_DESC.indexOf(b.rank));
+  const SUIT_NAMES: Record<string, string> = { S: "Spades", H: "Hearts", C: "Clubs", D: "Diamonds" };
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
       style={{ position: "absolute", inset: 0, zIndex: 52, display: "grid", placeItems: "center", background: "rgba(59,34,71,.55)" }}>
       <motion.div initial={{ scale: 0.85, y: 16 }} animate={{ scale: 1, y: 0 }} transition={SPRING_SOFT}
-        style={{ background: "var(--parchment)", border: "3px solid var(--gold)", borderRadius: 16, padding: "16px 20px", textAlign: "center", boxShadow: "0 14px 44px rgba(0,0,0,.45)", width: "min(430px, 94vw)" }}>
+        style={{ background: "var(--parchment)", border: "3px solid var(--gold)", borderRadius: 16, padding: "16px 20px", textAlign: "center", boxShadow: "0 14px 44px rgba(0,0,0,.45)", width: "min(460px, 96vw)" }}>
 
         {/* the moment */}
-        <div style={{ fontSize: 20 }}>♛ <b>You win the bid</b></div>
+        <div style={{ fontSize: 20 }}>♛ <b>You win the bid</b> <span style={{ fontSize: 12, color: "var(--ink-soft)", fontWeight: 700 }}>· step {step} of 2</span></div>
         <div style={{ fontSize: 34, fontWeight: 800, color: "var(--gold)", lineHeight: 1.1 }}>{v.Y}</div>
         <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>your team must capture {v.Y} of {v.totalPoints ?? 150} points</div>
 
-        {/* step 1: trump — v2.2: switchable until you call (mis-click insurance, §9.1 amendment) */}
-        <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, color: "var(--ink-soft)", margin: "6px 0 4px" }}>
-          {stagedTrump ? "TRUMP" : "CHOOSE THE TRUMP"}
-        </div>
-        <Row>
-          {SUITS.map((s) => {
-            const chosen = stagedTrump === s;
-            return (
-              <motion.button key={s} whileTap={{ scale: 0.88 }}
-                onClick={() => { if (!chosen) { stageTrump(s); sendAction("CHOOSE_TRUMP", { suit: s }); sfx.lift(); } }}
-                style={{
-                  ...btnSec, fontSize: 24, padding: "8px 15px", borderRadius: 10,
-                  color: red(s) ? "#ff9b8a" : "var(--parchment)",
-                  background: chosen ? "var(--gold)" : "var(--ink)",
-                  opacity: stagedTrump && !chosen ? 0.55 : 1, cursor: "pointer",
-                }}>
-                {GLYPH[s]}
-              </motion.button>
-            );
-          })}
-        </Row>
-        {stagedTrump && (
-          <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 3 }}>
-            changed your mind? tap another suit — trump locks when you call
-          </div>
+        {step === 1 ? (
+          /* ---- step 1: trump (switchable until you call, §9.1) ---- */
+          <>
+            <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, color: "var(--ink-soft)", margin: "6px 0 6px" }}>
+              CHOOSE THE TRUMP SUIT
+            </div>
+            <Row>
+              {SUITS.map((s) => {
+                const chosen = stagedTrump === s;
+                return (
+                  <motion.button key={s} whileTap={{ scale: 0.88 }}
+                    onClick={() => { if (!chosen) { stageTrump(s); sendAction("CHOOSE_TRUMP", { suit: s }); sfx.lift(); } setStep(2); }}
+                    style={{
+                      ...btnSec, fontSize: 30, padding: "12px 18px", borderRadius: 12,
+                      color: red(s) ? "#ff9b8a" : "var(--parchment)",
+                      background: chosen ? "var(--gold)" : "var(--ink)",
+                      opacity: stagedTrump && !chosen ? 0.55 : 1, cursor: "pointer",
+                    }}>
+                    {GLYPH[s]}
+                  </motion.button>
+                );
+              })}
+            </Row>
+            {stagedTrump && (
+              <button onClick={() => setStep(2)} style={{ ...btn, padding: "10px 24px", fontSize: 15, marginTop: 12 }}>
+                Next: pick your card ▸
+              </button>
+            )}
+          </>
+        ) : (
+          /* ---- step 2: partner card(s) — your hand is visible, picker is honors + points only ---- */
+          <>
+            <button onClick={() => setStep(1)} style={{ ...btnSec, padding: "5px 12px", fontSize: 12.5, borderRadius: 8, marginBottom: 8 }}>
+              ‹ trump <b style={{ color: stagedTrump && red(stagedTrump) ? "var(--coral)" : "var(--ink)" }}>{stagedTrump ? GLYPH[stagedTrump] : "?"}</b> — change
+            </button>
+
+            {/* #1a: your own hand, always visible while you choose */}
+            <div style={{ background: "rgba(59,34,71,.05)", borderRadius: 8, padding: "6px 8px", marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: "var(--ink-soft)", marginBottom: 4 }}>YOUR HAND</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 3, justifyContent: "center" }}>
+                {handSorted.map((c, i) => (
+                  <span key={i} style={{ fontSize: 12.5, fontWeight: 800, padding: "2px 5px", borderRadius: 5, background: "var(--card)", border: "1px solid rgba(59,34,71,.15)", color: suitTone(c.suit) }}>
+                    {ck(c)}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, color: "var(--ink-soft)", margin: "2px 0 4px" }}>
+              SELECT {C} CARD{C > 1 ? "S" : ""} TO CALL {C > 1 ? "AS PARTNERS" : "AS PARTNER"}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 8 }}>
+              {twoDeck
+                ? <>two copies of every card exist — <b>whoever plays the first copy joins your team</b> (maybe even you)</>
+                : <>whoever holds {C > 1 ? "them" : "it"} secretly joins your team — call a card you hold to go solo</>}
+            </div>
+
+            {SUITS.map((s) => {
+              const suitColor = suitTone(s);
+              return (
+                <div key={s} style={{ display: "flex", gap: 5, justifyContent: "center", alignItems: "center", marginBottom: 5 }}>
+                  <span style={{ width: 78, textAlign: "right", paddingRight: 6, fontSize: 12.5, color: suitColor, fontWeight: 800 }}>
+                    {SUIT_NAMES[s]} <span style={{ fontSize: 15 }}>{GLYPH[s]}</span>
+                  </span>
+                  {RANKS_PICK.map((r) => {
+                    const c: Card = { suit: s, rank: r };
+                    const dead = trimmed.has(`${r}${s}`);
+                    const sel = isPicked(c);
+                    const sug = isSuggested(c) && !sel;
+                    const held = inHand(c);
+                    return (
+                      <button key={r} disabled={dead} onClick={() => toggle(c)} title={held ? "you hold a copy of this card" : undefined}
+                        style={{
+                          position: "relative", width: 40, height: 44, borderRadius: 9, fontWeight: 800, cursor: dead ? "default" : "pointer",
+                          display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1,
+                          border: sel ? "2px solid var(--ink)" : sug ? "2px dashed var(--gold)" : "1px solid rgba(59,34,71,.2)",
+                          background: sel ? "var(--gold)" : dead ? "transparent" : "var(--card)",
+                          color: sel ? "#fff" : dead ? "rgba(59,34,71,.15)" : suitColor,
+                          padding: 0,
+                        }}>
+                        <span style={{ fontSize: 15 }}>{r}</span>
+                        <span style={{ fontSize: 10, opacity: 0.85 }}>{GLYPH[s]}</span>
+                        {held && !dead && <span style={{ position: "absolute", top: 3, right: 4, width: 6, height: 6, borderRadius: 6, background: sel ? "#fff" : "var(--coral)" }} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+
+            {suggested && picked.length < C && (
+              <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
+                💡 Suggested: <b style={{ color: suitTone(suggested.suit) }}>{ck(suggested)}</b> — a strong card you don't hold
+              </div>
+            )}
+
+            {/* the confirmation that ends all ambiguity: your selection as a REAL card, big */}
+            <div style={{ minHeight: 92, display: "flex", gap: 8, justifyContent: "center", alignItems: "center", marginTop: 8 }}>
+              {picked.length === 0
+                ? <span style={{ fontSize: 12, color: "var(--ink-soft)", fontStyle: "italic" }}>tap a card above — it'll show here full size</span>
+                : picked.map((c) => (
+                  <motion.div key={ck(c)} initial={{ scale: 0.6, y: 8 }} animate={{ scale: 1, y: 0 }} transition={SPRING}>
+                    <CardFace card={c} width={58} highlight />
+                    {inHand(c) && <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--coral)", marginTop: 2 }}>{twoDeck ? "YOU HOLD A COPY" : "IN YOUR HAND 🎭"}</div>}
+                  </motion.div>
+                ))}
+            </div>
+
+            {/* #5: double/triple-partner risk when you call a card you already hold a copy of */}
+            <div style={{ minHeight: 34, fontSize: 11.5, fontWeight: 700, color: "var(--coral)", lineHeight: 1.3, padding: "0 4px" }}>
+              {heldCount > 0 && (twoDeck
+                ? <>⚠ {shares === 3 ? "TRIPLE PARTNER" : "DOUBLE PARTNER"} — you hold a copy of {heldCount === 1 ? "one called card" : "both called cards"}. Play {heldCount === 1 ? "it" : "them"} first and you carry {shares} shares: win big (+{shares}×{v.Y}) or lose big (−{shares}×{v.Y}).</>
+                : <>calling your own card — SOLO play: you keep all {shares} share{shares > 1 ? "s" : ""} and gift nobody a partner slot.</>)}
+            </div>
+
+            <button disabled={picked.length !== C} onClick={() => { sendAction("CALL_CARDS", { cards: picked }); pickCache.delete(v.roundNumber); sfx.thock(); }}
+              style={{ ...btn, padding: "11px 26px", fontSize: 15, opacity: picked.length === C ? 1 : 0.4, marginTop: 2 }}>
+              {picked.length === C ? `Call ${picked.map(ck).join(" + ")} ▸` : `pick ${C - picked.length} more`}
+            </button>
+          </>
         )}
         <SetupCountdown view={v} />
-
-        {/* step 2: partner card(s) — tap to select from the full deck grid */}
-        <div style={{ opacity: stagedTrump ? 1 : 0.35, pointerEvents: stagedTrump ? "auto" : "none", transition: "opacity .25s" }}>
-          <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, color: "var(--ink-soft)", margin: "12px 0 4px" }}>
-            SELECT {C} CARD{C > 1 ? "S" : ""} TO BE YOUR PARTNER{C > 1 ? "S" : ""}
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 6 }}>
-            {(v.deckCount ?? 1) === 2
-              ? <>two copies of every card exist — <b>whoever plays the first copy joins your team</b> (maybe even you)</>
-              : <>whoever holds {C > 1 ? "them" : "it"} secretly joins your team — call a card you hold to go solo</>}
-          </div>
-          {SUITS.map((s) => {
-            const SUIT_NAMES: Record<string, string> = { S: "Spades", H: "Hearts", C: "Clubs", D: "Diamonds" };
-            // diamonds render in a distinct orange so ♥/♦ can never be mistaken at small sizes (playtest #6)
-            const suitColor = s === "H" ? "#c73a3a" : s === "D" ? "#d97b28" : "var(--ink)";
-            return (
-              <div key={s} style={{ display: "flex", gap: 3, justifyContent: "center", alignItems: "center", marginBottom: 4 }}>
-                <span style={{ width: 74, textAlign: "right", paddingRight: 6, fontSize: 12, color: suitColor, fontWeight: 800 }}>
-                  {SUIT_NAMES[s]} <span style={{ fontSize: 15 }}>{GLYPH[s]}</span>
-                </span>
-                {RANKS_DESC.map((r) => {
-                  const c: Card = { suit: s, rank: r };
-                  const dead = trimmed.has(`${r}${s}`);
-                  const sel = isPicked(c);
-                  return (
-                    <button key={r} disabled={dead} onClick={() => toggle(c)}
-                      style={{
-                        width: 26, height: 26, borderRadius: 6, fontSize: 11.5, fontWeight: 800, cursor: dead ? "default" : "pointer",
-                        border: sel ? "2px solid var(--ink)" : "1px solid rgba(59,34,71,.2)",
-                        background: sel ? "var(--gold)" : dead ? "transparent" : "var(--card)",
-                        color: sel ? "#fff" : dead ? "rgba(59,34,71,.15)" : suitColor,
-                        padding: 0,
-                      }}>
-                      {r}
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })}
-          {/* the confirmation that ends all ambiguity: your selection as a REAL card, big */}
-          <div style={{ minHeight: 96, display: "flex", gap: 8, justifyContent: "center", alignItems: "center", marginTop: 6 }}>
-            {picked.length === 0
-              ? <span style={{ fontSize: 12, color: "var(--ink-soft)", fontStyle: "italic" }}>tap a card above — it'll show here full size</span>
-              : picked.map((c, i) => (
-                <motion.div key={ck(c)} initial={{ scale: 0.6, y: 8 }} animate={{ scale: 1, y: 0 }} transition={SPRING}>
-                  <CardFace card={c} width={60} highlight />
-                  {inHand(c) && <div style={{ fontSize: 10, fontWeight: 800, color: "var(--coral)", marginTop: 2 }}>IN YOUR HAND 🎭</div>}
-                </motion.div>
-              ))}
-          </div>
-          <div style={{ minHeight: 18, fontSize: 12, fontWeight: 700, color: "var(--coral)" }}>
-            {picked.some(inHand) && <>calling your own card — that's a SOLO play</>}
-          </div>
-          <button disabled={picked.length !== C} onClick={() => { sendAction("CALL_CARDS", { cards: picked }); pickCache.delete(v.roundNumber); sfx.thock(); }}
-            style={{ ...btn, padding: "11px 26px", fontSize: 15, opacity: picked.length === C ? 1 : 0.4, marginTop: 2 }}>
-            {picked.length === C ? `Call ${picked.map(ck).join(" + ")} ▸` : `pick ${C - picked.length} more`}
-          </button>
-        </div>
       </motion.div>
     </motion.div>
   );
@@ -347,7 +417,7 @@ const Shell = ({ children, wide }: { children: React.ReactNode; wide: boolean })
 );
 
 /* ------------------------------ HUD: what matters, where you look ------------------------------ */
-function HUD({ view: v, onMute }: { view: ExtendedView; onMute: () => void }) {
+function HUD({ view: v, onMute, onLeaderboard }: { view: ExtendedView; onMute: () => void; onLeaderboard: () => void }) {
   const wide = useWide();
   const stagedLocal = useStore((s) => s.stagedTrump);
   const stagedTrump = stagedLocal ?? v.stagedTrumpOwn ?? null;
@@ -415,6 +485,10 @@ function HUD({ view: v, onMute }: { view: ExtendedView; onMute: () => void }) {
             {wide ? "🕐 last hand" : "🕐"}
           </button>
         )}
+        <button aria-label="leaderboard" title="Leaderboard — everyone's score" onClick={onLeaderboard}
+          style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, whiteSpace: "nowrap", flexShrink: 0 }}>
+          {wide ? "🏆 scores" : "🏆"}
+        </button>
         <button aria-label="mute" style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, flexShrink: 0 }} onClick={() => { toggleMute(); onMute(); }}>
           {isMuted() ? "🔇" : "🔊"}
         </button>
@@ -427,6 +501,44 @@ const nameOf = (v: ExtendedView, s: number) => v.seatNames?.[s] ?? `Seat ${s}`;
 const firstName = (v: ExtendedView, s: number) => nameOf(v, s).split(" ")[0]!;
 /** Player-chosen face (server-validated); seat-index animal only as legacy fallback. */
 const faceOf = (v: ExtendedView, s: number): string => v.seatAvatars?.[s] ?? AVATARS[s % AVATARS.length]!;
+
+/** #2: everyone's running score, on demand — names + faces (not just same-tint icons). */
+function LeaderboardModal({ view: v, open, onClose }: { view: ExtendedView; open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  const ranked = v.totalScore.map((t, s) => ({ s, t })).sort((a, b) => b.t - a.t);
+  const leader = ranked[0]?.t ?? 0;
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
+      style={{ position: "absolute", inset: 0, zIndex: 60, display: "grid", placeItems: "center", background: "rgba(59,34,71,.55)" }}>
+      <motion.div initial={{ scale: 0.9, y: 12 }} animate={{ scale: 1, y: 0 }} transition={SPRING_SOFT} onClick={(e) => e.stopPropagation()}
+        style={{ background: "var(--parchment)", border: "3px solid var(--gold)", borderRadius: 16, padding: "16px 18px", width: "min(360px, 92vw)", boxShadow: "0 14px 44px rgba(0,0,0,.45)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontSize: 16, fontWeight: 900 }}>🏆 Leaderboard</div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>after round {v.roundNumber} / {v.N}</div>
+        </div>
+        {ranked.map((r, i) => {
+          const you = r.s === v.viewerSeat;
+          return (
+            <div key={r.s} style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "7px 9px", borderRadius: 10, marginBottom: 4,
+              background: you ? "rgba(201,153,46,.18)" : i === 0 ? "rgba(201,153,46,.08)" : "transparent",
+              border: you ? "1.5px solid var(--gold)" : "1px solid transparent",
+            }}>
+              <span style={{ width: 18, textAlign: "center", fontWeight: 800, fontSize: 13, color: "var(--ink-soft)" }}>{i + 1}</span>
+              <span style={{ width: 8, height: 8, borderRadius: 8, background: SEAT_COLORS[r.s % SEAT_COLORS.length], flexShrink: 0 }} />
+              <Face id={faceOf(v, r.s)} size={26} tint={SEAT_COLORS[r.s % SEAT_COLORS.length]} />
+              <span style={{ flex: 1, minWidth: 0, fontWeight: you ? 800 : 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {nameOf(v, r.s)}{you && <span style={{ color: "var(--gold)", fontWeight: 800 }}> (you)</span>}
+              </span>
+              <b style={{ fontSize: 16, minWidth: 42, textAlign: "right", color: r.t === leader && leader !== 0 ? "var(--gold)" : "var(--ink)" }}>{r.t}</b>
+            </div>
+          );
+        })}
+        <button onClick={onClose} style={{ ...btnSec, width: "100%", marginTop: 8, padding: "9px 0", fontSize: 14 }}>Close</button>
+      </motion.div>
+    </motion.div>
+  );
+}
 
 /* ------------------------------ seats ------------------------------ */
 function TimerRing({ active, budgetMs, size, self }: { active: boolean; budgetMs: number; size: number; self?: boolean }) {
@@ -1315,10 +1427,14 @@ function useTheater(view: ExtendedView | null, setOverlay: (o: Overlay) => void,
           }
           break;
         }
-        case "BID_PLACED":
-          if (d.value >= 150) { sfx.slam150(); hold({ type: "slam", seat: d.seat }, 1400); }
+        case "BID_PLACED": {
+          // #3: the "table goes quiet" slam is for an all-in (full-pot) bid — in single-deck that's 150,
+          // in two-deck it's 300. Show the ACTUAL bid, not a hardcoded 150.
+          const tp = useStore.getState().view?.totalPoints ?? 150;
+          if (d.value >= tp) { sfx.slam150(); hold({ type: "slam", seat: d.seat, value: d.value }, 1400); }
           else sfx.bid(d.value);
           break;
+        }
         case "PLAYER_PASSED": sfx.pass(); break;
         case "AUCTION_ENDED": {
           const self = useStore.getState().view?.viewerSeat === d.declarerSeat;
@@ -1349,14 +1465,8 @@ function useTheater(view: ExtendedView | null, setOverlay: (o: Overlay) => void,
           break;
         }
         case "TRICK_WON": { sfx.gather(); haptic(15); if (d.points > 0) for (let i = 0; i < Math.min(4, Math.ceil(d.points / 10)); i++) sfx.coin(i); break; }
-        case "ROUND_SCORED": {
-          if (d.success) { sfx.made(); confetti?.(); } else sfx.failed();
-          const losers = (d.roundDelta as number[]).filter((x) => x < 0);
-          const soloFail = !d.success && losers.length === 1;
-          // playtest #7: the verdict STAYS — the player dismisses it when they're done reading
-          setOverlay({ type: "round", success: d.success, pts: d.declarerTeamPoints, delta: d.roundDelta, solo: soloFail });
-          break;
-        }
+        // ROUND_SCORED verdict (sound + confetti + overlay) is handled by the state-derived effect in
+        // Table() so it can be deferred past the final trick — see #4. Nothing to cue live here.
         case "GAME_ENDED": sfx.fanfare(); confetti?.(); break;
         case "EMOTE": {
           sfx.emote();
@@ -1397,7 +1507,7 @@ function OverlayContent({ overlay, view: v, onDismiss }: { overlay: NonNullable<
   const av = (s: number) => <Face id={faceOf(v, s)} size={22} />;
   switch (overlay.type) {
     case "slam":
-      return <div style={{ fontSize: 24 }}><b>{av(overlay.seat)} {name(overlay.seat)} bids 150!</b><div style={{ fontSize: 15, color: "var(--ink-soft)" }}>The table goes quiet…</div></div>;
+      return <div style={{ fontSize: 24 }}><b>{av(overlay.seat)} {name(overlay.seat)} bids {overlay.value}!</b><div style={{ fontSize: 15, color: "var(--ink-soft)" }}>The table goes quiet…</div></div>;
     case "crown":
       return <div style={{ fontSize: 22 }}>♛ <b>{name(overlay.seat)}</b> wins the bid<div style={{ fontSize: 30, fontWeight: 700, color: "var(--gold)" }}>{overlay.Y}</div></div>;
     case "contract":
@@ -1424,7 +1534,10 @@ function OverlayContent({ overlay, view: v, onDismiss }: { overlay: NonNullable<
         </div>
       );
     }
-    case "round":
+    case "round": {
+      const isFinal = v.roundNumber >= v.N;
+      const target = v.Y; // the contract they were chasing (may be null after teardown)
+      const need = target != null ? <> of the <b>{target}</b> they needed</> : null;
       return (
         <div>
           {overlay.solo && (
@@ -1433,18 +1546,23 @@ function OverlayContent({ overlay, view: v, onDismiss }: { overlay: NonNullable<
             </motion.div>
           )}
           <div style={{ fontSize: 30, fontWeight: 800, color: overlay.success ? "var(--teal)" : "var(--coral)" }}>
-            {overlay.success ? "BID MADE" : overlay.solo ? "DOWN ALONE" : "BID FAILED"}
+            {overlay.success ? "CONTRACT MADE" : overlay.solo ? "DOWN ALONE" : "CONTRACT FAILED"}
           </div>
-          <div style={{ color: "var(--ink-soft)" }}>
+          <div style={{ color: "var(--ink-soft)", lineHeight: 1.4 }}>
             {(() => {
               const team = overlay.delta.map((d, s) => ({ d, s })).filter((x) => x.d !== 0);
               const teamNames = team.map((x) => name(x.s)).join(" & ");
-              if (overlay.solo) return <>the Queen shakes her head slowly… <b>{teamNames}</b> ate it alone</>;
+              if (overlay.solo) return <>the Queen shakes her head slowly… <b>{teamNames}</b> went down alone at <b>{overlay.pts}</b>{need}</>;
               return overlay.success
-                ? <><b>{teamNames}</b> took {overlay.pts} points</>
-                : <><b>{teamNames}</b> fell short at {overlay.pts} — the defenders held the line</>;
+                ? <><b>{teamNames}</b> captured <b>{overlay.pts}</b> points{need} — contract held ✓</>
+                : <><b>{teamNames}</b> fell short at <b>{overlay.pts}</b>{need}. The defenders held the line.</>;
             })()}
           </div>
+          {v.lastRoundEarlyEnd && (
+            <div style={{ marginTop: 5, fontSize: 12, fontWeight: 700, color: "var(--ink-soft)" }}>
+              ⚡ Called early — the outcome was already decided, so the last tricks were skipped.
+            </div>
+          )}
           <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 3, alignItems: "center" }}>
             {overlay.delta.map((d, s) => (
               <span key={s} style={{ fontWeight: d !== 0 ? 800 : 400, fontSize: d !== 0 ? 16 : 13, color: d > 0 ? "var(--teal)" : d < 0 ? "var(--coral)" : "var(--ink-soft)" }}>
@@ -1453,6 +1571,11 @@ function OverlayContent({ overlay, view: v, onDismiss }: { overlay: NonNullable<
             ))}
           </div>
           <RoundInsights view={v} />
+          {isFinal && (
+            <div style={{ marginTop: 10, fontSize: 14, fontWeight: 800, color: "var(--gold)" }}>
+              🏁 That was the final round — the game is over.
+            </div>
+          )}
           <div style={{ marginTop: 12, display: "flex", gap: 10, justifyContent: "center" }}>
             {v.hostSeat === v.viewerSeat && v.roundNumber < v.N && (
               <button style={{ ...btn, padding: "10px 20px" }}
@@ -1461,11 +1584,12 @@ function OverlayContent({ overlay, view: v, onDismiss }: { overlay: NonNullable<
               </button>
             )}
             <button style={{ ...btnSec, padding: "10px 18px" }} onClick={onDismiss}>
-              {v.hostSeat === v.viewerSeat ? "Look at the table" : "Close"}
+              {isFinal ? "See final standings ▸" : v.hostSeat === v.viewerSeat ? "Look at the table" : "Close"}
             </button>
           </div>
         </div>
       );
+    }
   }
 }
 

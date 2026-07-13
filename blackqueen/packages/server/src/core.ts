@@ -284,7 +284,9 @@ export class RoomCore {
     order.forEach((id, seat) => this.seatOf.set(id, seat));
 
     const round1Seat = this.uniform(n - 1); // round1DefaultDeclarerSelection: random (§16)
-    this.game = initGame(n, this.config.N, round1Seat, this.config.deckCount, this.config.calledCount, handSize);
+    // autoEndDecidedRounds = true (v2.3): live play skips the dead-rubber tail once the contract is
+    // settled and every partner is public. The pure engine defaults this off so property suites play full rounds.
+    this.game = initGame(n, this.config.N, round1Seat, this.config.deckCount, this.config.calledCount, handSize, true);
     this.phase = "IN_GAME";
     this.wasConnectedThisRound = Array(n).fill(true);
     this.broadcastEvent("SEATING", { seats: this.seatNames, avatars: this.seatAvatars, hostSeat: this.seatOf.get(this.hostAccountId) });

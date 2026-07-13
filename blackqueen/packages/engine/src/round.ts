@@ -48,8 +48,12 @@ export interface GameState {
   phase: Phase;
   pausedFrom: "TRUMP_SELECTION" | "CALLING_PARTNERS" | null;
   round: RoundData | null;
-  lastRoundResult: (RoundScore & { roundNumber: number }) | null;
+  lastRoundResult: (RoundScore & { roundNumber: number; earlyEnd: boolean }) | null;
   nextDefaultDeclarerSeat: number; // rotation pointer (round-1 seat at init)
+  // v2.3: when true, a round ends the instant its outcome is mathematically settled AND every partner is
+  // already public (no hidden-info leak) — the "dead rubber" tail is skipped. Off by default so the pure
+  // engine/property suites still play full rounds; the server turns it on for live play.
+  autoEndDecidedRounds: boolean;
 }
 
 export type Action =
@@ -76,7 +80,7 @@ export type Event =
   | { kind: "CARD_PLAYED"; seat: number; card: Card; auto: boolean }
   | { kind: "PARTNER_REVEALED"; seat: number; card: Card }
   | { kind: "TRICK_WON"; winnerSeat: number; points: number; capturedPointsWinner: number }
-  | { kind: "ROUND_SCORED"; roundNumber: number; success: boolean; declarerTeamPoints: number; roundDelta: number[]; totalScore: number[] }
+  | { kind: "ROUND_SCORED"; roundNumber: number; success: boolean; declarerTeamPoints: number; roundDelta: number[]; totalScore: number[]; earlyEnd: boolean }
   | { kind: "GAME_ENDED"; totalScore: number[]; ranks: number[]; reason: "completed" | "host_end_paused" | "host_end_aborted" }
   | { kind: "PAUSED" } // deliberately carries NO sub-state (§9.2 disclosure gating)
   | { kind: "RESUMED" }
@@ -86,7 +90,7 @@ export type ApplyResult =
   | { ok: true; state: GameState; events: Event[]; versionBump: boolean }
   | { ok: false; reject: "ILLEGAL" | "NOT_YOUR_TURN" | "WRONG_PHASE" };
 
-export function initGame(playerCount: number, N: number, round1DefaultDeclarerSeat: number, deckCount = 1, calledCountOverride?: number, handSizeOverride?: number): GameState {
+export function initGame(playerCount: number, N: number, round1DefaultDeclarerSeat: number, deckCount = 1, calledCountOverride?: number, handSizeOverride?: number, autoEndDecidedRounds = false): GameState {
   if (playerCount < 4 || playerCount > 7) throw new Error("4–7 players only (§2)");
   if (deckCount !== 1 && deckCount !== 2) throw new Error("deckCount must be 1 or 2 (§16)");
   if (deckCount === 2 && playerCount < 6) throw new Error("2-deck games require 6–7 players (§3/§16)");
@@ -111,6 +115,7 @@ export function initGame(playerCount: number, N: number, round1DefaultDeclarerSe
     round: null,
     lastRoundResult: null,
     nextDefaultDeclarerSeat: round1DefaultDeclarerSeat,
+    autoEndDecidedRounds,
   };
 }
 
@@ -309,7 +314,13 @@ function playCard(state: GameState, seat: number, card: Card, auto: boolean): Ap
       turnSeat: winnerSeat,
     };
     if (round.hands.every((h) => h.length === 0)) {
-      return scoreAndEndRound(state, round, events); // ROUND_SCORING guard: all hands empty (§10)
+      return scoreAndEndRound(state, round, events, false); // ROUND_SCORING guard: all hands empty (§10)
+    }
+    // v2.3 dead-rubber auto-end: once every partner is public AND the contract is mathematically
+    // settled, the remaining tricks can't change the outcome — score now and skip them. Gated by
+    // allPartnersRevealed so this leaks nothing that wasn't already claimed on the felt.
+    if (state.autoEndDecidedRounds && allPartnersRevealed(round) && contractDecided(state, round)) {
+      return scoreAndEndRound(state, round, events, true);
     }
   } else {
     round.turnSeat = (seat + 1) % state.playerCount;
@@ -317,8 +328,18 @@ function playCard(state: GameState, seat: number, card: Card, auto: boolean): Ap
   return { ok: true, versionBump: true, events, state: { ...state, round } };
 }
 
-function scoreAndEndRound(state: GameState, round: RoundData, events: Event[]): ApplyResult {
-  const claimants = round.claimedBy.map((s) => s!); // round complete ⇒ every called card claimed (§9.3)
+/** Is the contract's outcome already settled? Only meaningful once allPartnersRevealed (team is public). */
+function contractDecided(state: GameState, round: RoundData): boolean {
+  const teamSeats = new Set<number>([round.declarerSeat, ...round.claimedBy.map((s) => s!)]);
+  const declarerTeamPoints = [...teamSeats].reduce((sum, seat) => sum + round.capturedPoints[seat]!, 0);
+  if (declarerTeamPoints >= round.Y) return true; // already made — more points can't unmake it
+  const captured = round.capturedPoints.reduce((a, b) => a + b, 0);
+  const remaining = state.totalPoints - captured;
+  return declarerTeamPoints + remaining < round.Y; // can't reach Y even if the team wins every remaining point
+}
+
+function scoreAndEndRound(state: GameState, round: RoundData, events: Event[], earlyEnd: boolean): ApplyResult {
+  const claimants = round.claimedBy.map((s) => s!); // round scored ⇒ every called card claimed (§9.3 / auto-end guard)
   const score = scoreRound(state.playerCount, round.Y, round.declarerSeat, round.calledCards, claimants, round.capturedPoints);
   const totalScore = state.totalScore.map((t, i) => t + score.roundDelta[i]!);
   events.push({
@@ -328,6 +349,7 @@ function scoreAndEndRound(state: GameState, round: RoundData, events: Event[]): 
     declarerTeamPoints: score.declarerTeamPoints,
     roundDelta: score.roundDelta,
     totalScore,
+    earlyEnd,
   });
   let phase: Phase = "ROUND_END";
   if (state.roundNumber >= state.N) {
@@ -336,7 +358,7 @@ function scoreAndEndRound(state: GameState, round: RoundData, events: Event[]): 
   }
   return {
     ok: true, versionBump: true, events,
-    state: { ...state, phase, totalScore, round: { ...round, turnSeat: null }, lastRoundResult: { ...score, roundNumber: state.roundNumber } },
+    state: { ...state, phase, totalScore, round: { ...round, turnSeat: null }, lastRoundResult: { ...score, roundNumber: state.roundNumber, earlyEnd } },
   };
 }
 
@@ -389,6 +411,7 @@ function endFromPaused(state: GameState): ApplyResult {
       declarerTeamPoints: 0,
       roundDelta: delta,
       totalScore,
+      earlyEnd: false,
     },
     { kind: "GAME_ENDED", totalScore, ranks: competitionRanks(totalScore), reason: "host_end_paused" },
   ];

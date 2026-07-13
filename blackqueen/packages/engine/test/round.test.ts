@@ -1,7 +1,7 @@
 // TEST_CASES.md §3 (REVEAL), §5 (HID engine-level), §9 (PHASE/ROT/ENDEQ engine-level), §6 TO-003, §8 PAUSE-001
 import { describe, expect, it } from "vitest";
 import {
-  initGame, applyAction, playerView, GameState, Action, Event, Card, cardKey,
+  initGame, applyAction, playerView, GameState, Action, Event, Card, cardKey, RoundData,
 } from "../src/index.js";
 
 const seed = new Uint8Array(Array.from({ length: 32 }, (_, i) => i));
@@ -310,5 +310,67 @@ describe("CLAIM-001/002 — 2-deck claim model (TEST_CASES §11)", () => {
     const before = total();
     s = ok(s, { type: "TIMEOUT" }).state; // one auto-play
     expect(total()).toBe(before); // conservation: 102 cards accounted for at all times
+  });
+});
+
+// DEADRUBBER — v2.3: end a round the instant its outcome is settled AND every partner is public.
+describe("DEADRUBBER — auto-end decided rounds", () => {
+  const S = (r: string): Card => ({ suit: "S", rank: r as Card["rank"] });
+  // A mid-round TRICK_PLAY state: partner (seat1) already claimed Q♠, all hands hold 2 plain spades,
+  // so a full trick can resolve without emptying hands — the ideal probe for the auto-end check.
+  const mkRound = (over: Partial<RoundData> = {}): RoundData => ({
+    defaultDeclarerSeat: 0,
+    hands: [[S("2"), S("3")], [S("4"), S("6")], [S("7"), S("8")], [S("9"), S("J")]],
+    bidding: { currentHighBid: 5, currentHighBidderSeat: 0, activeSeats: [0], turnSeat: null, history: [] },
+    declarerSeat: 0, Y: 5, stagedTrump: null, trump: "S", calledCards: [S("Q")],
+    claimedBy: [1], revealedTeamMembers: [0, 1],
+    trickLeaderSeat: 0, currentTrick: [], completedTricks: [],
+    capturedPoints: [10, 0, 0, 0], // declarer team (seats 0,1) already holds 10 ≥ Y=5 → made for sure
+    turnSeat: 0,
+    ...over,
+  });
+  const mkState = (autoEnd: boolean, round: RoundData): GameState => ({
+    playerCount: 4, N: 1, deckCount: 1, handSize: 2, calledCount: 1, totalPoints: 150,
+    roundNumber: 1, totalScore: [0, 0, 0, 0], phase: "TRICK_PLAY", pausedFrom: null,
+    round, lastRoundResult: null, nextDefaultDeclarerSeat: 1, autoEndDecidedRounds: autoEnd,
+  });
+  const playFullTrick = (s: GameState) => {
+    s = ok(s, { type: "PLAY_CARD", seat: 0, card: S("2") }).state;
+    s = ok(s, { type: "PLAY_CARD", seat: 1, card: S("4") }).state;
+    s = ok(s, { type: "PLAY_CARD", seat: 2, card: S("7") }).state;
+    return ok(s, { type: "PLAY_CARD", seat: 3, card: S("9") });
+  };
+
+  it("ends the round early (mid-hand) once decided + all partners revealed", () => {
+    const r = playFullTrick(mkState(true, mkRound()));
+    const scored = r.events.find((e) => e.kind === "ROUND_SCORED") as Extract<Event, { kind: "ROUND_SCORED" }>;
+    expect(scored).toBeTruthy();
+    expect(scored.earlyEnd).toBe(true);
+    expect(scored.success).toBe(true); // 10 ≥ Y=5
+    expect(r.state.phase).toBe("GAME_END"); // N=1
+    expect(r.state.round!.hands.some((h) => h.length > 0)).toBe(true); // hands NOT empty — tail was skipped
+    expect(playerView(r.state, 0).lastRoundEarlyEnd).toBe(true);
+  });
+
+  it("gate off: same state plays on normally (no early end)", () => {
+    const r = playFullTrick(mkState(false, mkRound()));
+    expect(r.events.some((e) => e.kind === "ROUND_SCORED")).toBe(false);
+    expect(r.state.phase).toBe("TRICK_PLAY");
+  });
+
+  it("undecided contract keeps playing even with the gate on", () => {
+    // declarer team holds 0; 150 points still unaccounted → outcome not settled → no early end
+    const r = playFullTrick(mkState(true, mkRound({ capturedPoints: [0, 0, 0, 0] })));
+    expect(r.events.some((e) => e.kind === "ROUND_SCORED")).toBe(false);
+    expect(r.state.phase).toBe("TRICK_PLAY");
+  });
+
+  it("failed-for-sure ends early too (can't reach Y even with all remaining points)", () => {
+    // Y bigger than every point still in play: total captured so far 150 (all points already taken by
+    // defenders), declarer team 0 → 0 + 0 remaining < Y → decided failure.
+    const r = playFullTrick(mkState(true, mkRound({ Y: 20, capturedPoints: [0, 0, 90, 60] })));
+    const scored = r.events.find((e) => e.kind === "ROUND_SCORED") as Extract<Event, { kind: "ROUND_SCORED" }>;
+    expect(scored.earlyEnd).toBe(true);
+    expect(scored.success).toBe(false);
   });
 });
