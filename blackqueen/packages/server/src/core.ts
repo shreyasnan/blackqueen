@@ -4,7 +4,8 @@
 
 import {
   initGame, applyAction, playerView, GameState, Action, Event as EngineEvent, Suit, Card,
-  autoPlayCard, canonicalDeck, cardEq, SUITS, calledCardCount, rankIndex, minHandSize, maxHandSize,
+  canonicalDeck, cardEq, SUITS, calledCardCount, rankIndex, minHandSize, maxHandSize,
+  legalPlays, trickWinner, trickPoints, pointValue, RoundData,
 } from "@blackqueen/engine";
 
 export type RoomPhase = "OPEN" | "IN_GAME" | "ENDED";
@@ -180,7 +181,7 @@ export class RoomCore {
     const hand = r.hands[seat]!;
     switch (g.phase) {
       case "BIDDING":
-        return { type: "PASS", seat }; // bots never bid; the auction stays a human affair
+        return this.botBid(seat, r, g);
       case "TRUMP_SELECTION": {
         // longest suit in hand
         const best = SUITS.reduce((a, b) =>
@@ -214,11 +215,94 @@ export class RoomCore {
       }
       case "TRICK_PLAY": {
         const led = r.currentTrick.length === 0 ? null : r.currentTrick[0]!.card.suit;
-        return { type: "PLAY_CARD", seat, card: autoPlayCard(hand, led) };
+        return { type: "PLAY_CARD", seat, card: this.botTrickCard(seat, r, g, led) };
       }
       default:
         throw new Error(`bot asked to act in ${g.phase}`);
     }
+  }
+
+  /** Hand strength as an estimate of points the bot's side could gather if it takes the contract:
+   *  points held + high-card control + a long (potential-trump) suit that mops up others' cards. */
+  private handStrength(hand: Card[]): number {
+    const pts = hand.reduce((s, c) => s + pointValue(c), 0);
+    const aces = hand.filter((c) => c.rank === "A").length;
+    const kings = hand.filter((c) => c.rank === "K").length;
+    const longest = Math.max(0, ...SUITS.map((s) => hand.filter((c) => c.suit === s).length));
+    return pts + aces * 8 + kings * 4 + longest * 4;
+  }
+
+  /** Bidding: take the contract only when the hand clears the next bid with a cushion. Minimal raises
+   *  (the high bidder never bids against itself, §8.2), so a strong hand doesn't overpay into failure. */
+  private botBid(seat: number, r: RoundData, g: GameState): Action {
+    const H = r.bidding.currentHighBid;
+    const cap = g.totalPoints;
+    if (this.handStrength(r.hands[seat]!) >= H + 20 && H + 5 <= cap) return { type: "BID", seat, value: H + 5 };
+    return { type: "PASS", seat };
+  }
+
+  /** Trick play (competitive): win the point tricks, feed a locked teammate, conserve trumps, and never
+   *  gift point cards to an opponent's trick. Deterministic; total-ordered so replays are stable. */
+  private botTrickCard(seat: number, r: RoundData, g: GameState, led: Suit | null): Card {
+    const hand = r.hands[seat]!;
+    const trump = r.trump!;
+    const dc = g.deckCount;
+    const legal = legalPlays(hand, led);
+    if (legal.length === 1) return legal[0]!;
+
+    const suitI = (s: Suit) => SUITS.indexOf(s);
+    const byCheap = (a: Card, b: Card) => pointValue(a) - pointValue(b) || rankIndex(a.rank) - rankIndex(b.rank) || suitI(a.suit) - suitI(b.suit);
+    const byRichLose = (a: Card, b: Card) => pointValue(b) - pointValue(a) || rankIndex(a.rank) - rankIndex(b.rank) || suitI(a.suit) - suitI(b.suit);
+    const cheapest = (cs: Card[]) => cs.slice().sort(byCheap)[0]!;
+
+    // Our side, as far as it's public: declarer + revealed partners + ourselves (if we hold a called card,
+    // we know we're on the declarer's team even before we've revealed it).
+    const holdsCalled = r.calledCards.some((cc) => hand.some((h) => cardEq(h, cc)));
+    const onDeclarerSide = seat === r.declarerSeat || r.revealedTeamMembers.includes(seat) || holdsCalled;
+    const team = new Set<number>(onDeclarerSide ? [r.declarerSeat, ...r.revealedTeamMembers, seat] : [seat]);
+    const suitLen = (s: Suit) => hand.filter((c) => c.suit === s).length;
+
+    // ---- leading ----
+    if (led === null) {
+      const aces = legal.filter((c) => c.rank === "A" && c.suit !== trump);
+      if (aces.length > 0) return aces.sort((a, b) => rankIndex(b.rank) - rankIndex(a.rank) || suitI(a.suit) - suitI(b.suit))[0]!; // cash a likely winner
+      if (onDeclarerSide) {
+        const high = legal.filter((c) => c.suit !== trump).sort((a, b) => rankIndex(b.rank) - rankIndex(a.rank) || suitI(a.suit) - suitI(b.suit))[0];
+        if (high && rankIndex(high.rank) >= rankIndex("K")) return high; // pull the table with a top card
+      }
+      const lowNonPoint = legal.filter((c) => pointValue(c) === 0 && c.suit !== trump);
+      const src = lowNonPoint.length > 0 ? lowNonPoint : legal.filter((c) => pointValue(c) === 0);
+      const pool = src.length > 0 ? src : legal;
+      return pool.slice().sort((a, b) => suitLen(b.suit) - suitLen(a.suit) || rankIndex(a.rank) - rankIndex(b.rank) || suitI(a.suit) - suitI(b.suit))[0]!;
+    }
+
+    // ---- following ----
+    const curWinnerSeat = trickWinner(r.currentTrick, trump, dc);
+    const winnerIsTeammate = team.has(curWinnerSeat);
+    const isLast = r.currentTrick.length === g.playerCount - 1;
+    const pts = trickPoints(r.currentTrick);
+    const wins = (c: Card) => trickWinner([...r.currentTrick, { seat, card: c }], trump, dc) === seat;
+    const winners = legal.filter(wins);
+
+    if (winnerIsTeammate) {
+      // our side already holds the trick — if it's locked (we play last), pour in our richest losing card;
+      // otherwise shed the cheapest rather than overtake our own partner.
+      if (isLast && onDeclarerSide) {
+        const losers = legal.filter((c) => !wins(c));
+        if (losers.length > 0) return losers.sort(byRichLose)[0]!;
+      }
+      return cheapest(legal);
+    }
+
+    // an opponent is winning: take it if there are points on the table (or we're last to act), as cheaply
+    // as possible — this also covers trumping in when we're void in the led suit.
+    if (winners.length > 0 && (pts > 0 || isLast)) return cheapest(winners);
+
+    // can't or won't win: follow low if forced; if void, discard the cheapest NON-point card so we never
+    // hand Q♠/Aces to an opponent's trick.
+    if (hand.some((c) => c.suit === led)) return cheapest(legal);
+    const nonPoint = legal.filter((c) => pointValue(c) === 0);
+    return cheapest(nonPoint.length > 0 ? nonPoint : legal);
   }
 
   /** Whose turn is it, in the phases where someone is on turn? */
