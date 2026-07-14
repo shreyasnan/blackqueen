@@ -16,7 +16,84 @@ const SUIT_WORD: Record<string, string> = { C: "Clubs", D: "Diamonds", H: "Heart
 const SUITS: Suit[] = ["C", "D", "H", "S"];
 const AVATARS = ["🦊", "🦉", "🐱", "🦡", "🐰", "🦝", "🐸"];
 const SEAT_COLORS = ["#e0684b", "#2e8f83", "#c9992e", "#7b5ea7", "#4a7fb5", "#b5527f", "#6b8e3f"];
-const EMOTES: Record<string, string> = { hello: "👋", wellplayed: "👏", uhoh: "😬", trusted: "🎭 I trusted you!!", laugh: "😂", gg: "🫡" };
+// Quick-chat set (broadcast-only, fixed — keeps the hidden-team game clean; no free text, no targeting).
+const EMOTES: Record<string, { face: string; label: string; bubble: string }> = {
+  hi:         { face: "👋", label: "Hi",          bubble: "👋" },
+  haha:       { face: "😂", label: "Haha",        bubble: "😂" },
+  wow:        { face: "😮", label: "Wow",         bubble: "😮" },
+  wellplayed: { face: "👏", label: "Well played", bubble: "👏 Well played" },
+  gg:         { face: "🫡", label: "GG",          bubble: "🫡 GG" },
+  bringit:    { face: "😤", label: "Bring it",    bubble: "😤 Bring it" },
+  queen:      { face: "👸", label: "The Queen",   bubble: "👸 The Queen!" },
+  soclose:    { face: "😬", label: "So close",    bubble: "😬 So close" },
+  oops:       { face: "🙈", label: "Oops",        bubble: "🙈" },
+  phew:       { face: "😅", label: "Phew",        bubble: "😅" },
+};
+// wheel order: clockwise from the top
+const WHEEL_ORDER = ["wellplayed", "haha", "wow", "gg", "bringit", "queen", "soclose", "oops", "phew", "hi"];
+
+/** Hold-to-open quick-chat wheel: press the button, flick to a reaction, release — or tap-open then tap.
+ *  Broadcast-only, fixed set: expressive without becoming a signaling channel in a hidden-team game. */
+function QuickChatWheel() {
+  const [open, setOpen] = useState(false);
+  const [hover, setHover] = useState<number | null>(null);
+  const holding = useRef(false);
+  const lastSent = useRef(0);
+  const send = (key: string) => {
+    setOpen(false); setHover(null); holding.current = false;
+    const now = Date.now();
+    if (now - lastSent.current < 700) return; // local debounce (server enforces the real rate limit)
+    lastSent.current = now;
+    sendAction("EMOTE", { emote: key });
+    sfx.emote(); haptic(12);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const up = () => {
+      if (!holding.current) return;
+      holding.current = false;
+      if (hover != null) send(WHEEL_ORDER[hover]!); // flick-release landed on an item
+    };
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+  }, [open, hover]); // eslint-disable-line react-hooks/exhaustive-deps
+  const R = 112;
+  return (
+    <>
+      <button aria-label="react"
+        onPointerDown={(e) => {
+          try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* fine */ }
+          if (open) { setOpen(false); holding.current = false; return; }
+          holding.current = true; setHover(null); setOpen(true); sfx.lift();
+        }}
+        style={{ position: "absolute", right: 10, bottom: 116, zIndex: 30, width: 50, height: 50, borderRadius: 25, border: "1.5px solid var(--gold)", background: "var(--card)", boxShadow: "0 3px 10px rgba(0,0,0,.28)", fontSize: 24, cursor: "pointer", display: "grid", placeItems: "center" }}>
+        😊
+      </button>
+      {open && (
+        <>
+          <div onClick={() => { setOpen(false); holding.current = false; }} style={{ position: "absolute", inset: 0, zIndex: 40, background: "rgba(35,20,45,.3)" }} />
+          <div style={{ position: "absolute", left: "50%", top: "54%", transform: "translate(-50%,-50%)", zIndex: 41, width: 300, height: 300, pointerEvents: "none" }}>
+            <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 62, height: 62, borderRadius: 31, background: "rgba(255,253,247,.16)", border: "1.5px solid rgba(255,253,247,.5)", display: "grid", placeItems: "center", fontSize: 22 }}>😊</div>
+            {WHEEL_ORDER.map((key, i) => {
+              const ang = ((-90 + i * 36) * Math.PI) / 180;
+              const x = Math.cos(ang) * R, y = Math.sin(ang) * R;
+              const em = EMOTES[key]!; const on = hover === i;
+              return (
+                <button key={key} type="button"
+                  onPointerEnter={() => setHover(i)} onPointerLeave={() => setHover((h) => (h === i ? null : h))}
+                  onClick={() => send(key)}
+                  style={{ position: "absolute", left: `calc(50% + ${x}px)`, top: `calc(50% + ${y}px)`, transform: "translate(-50%,-50%)", pointerEvents: "auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: 66, border: 0, background: "transparent", cursor: "pointer", padding: 0 }}>
+                  <span style={{ width: 50, height: 50, borderRadius: 25, background: "var(--card)", display: "grid", placeItems: "center", fontSize: 24, border: on ? "2.5px solid var(--gold)" : "1px solid rgba(59,34,71,.15)", boxShadow: on ? "0 0 14px rgba(201,153,46,.7)" : "0 2px 6px rgba(0,0,0,.25)", transform: on ? "scale(1.12)" : "scale(1)", transition: "transform .1s ease" }}>{em.face}</span>
+                  <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", textShadow: "0 1px 3px rgba(0,0,0,.6)" }}>{em.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
 const red = (s: string) => s === "D" || s === "H";
 const ck = (c: Card) => `${c.rank}${GLYPH[c.suit]}`;
 const isQS = (c: Card) => c.rank === "Q" && c.suit === "S";
@@ -76,8 +153,10 @@ export function Table() {
   const [burst, setBurst] = useState(0);
   const [lbOpen, setLbOpen] = useState(false);
   const [gameEndAck, setGameEndAck] = useState(false); // #3: show the final verdict before the standings
+  const [muted, setMuted] = useState<Set<number>>(new Set()); // seats whose reactions you've muted (long-press their plate)
+  const toggleMute = (s: number) => setMuted((m) => { const n = new Set(m); n.has(s) ? n.delete(s) : n.add(s); return n; });
   const wide = useWide();
-  useTheater(view, setOverlay, setBubbles, () => setBurst((b) => b + 1));
+  useTheater(view, setOverlay, setBubbles, () => setBurst((b) => b + 1), muted);
   const [, force] = useState(0);
   // Playtest #2 fix: the round verdict is DERIVED FROM STATE, not only from the live event —
   // reconnect/refresh/late-join during ROUND_END still shows the "BID MADE/FAILED" screen.
@@ -127,12 +206,13 @@ export function Table() {
           <HUD view={view} onMute={() => force((x) => x + 1)} onLeaderboard={() => setLbOpen(true)} />
           <PartnerStatus view={view} />
           {/* ---- THE TABLE: top-down oval, seats around the rim, cards land in front of their player ---- */}
-          <PokerTable view={view} bubbles={bubbles} />
+          <PokerTable view={view} bubbles={bubbles} muted={muted} onToggleMute={toggleMute} />
           {/* ---- your controls + hand below the rail ---- */}
           <MyArea view={view} isHost={isHost} hideNext={overlay?.type === "round"} />
         </div>
         {wide && <ActivitySidebar view={view} isHost={isHost} />}
       </div>
+      {view.phase !== "GAME_END" && <QuickChatWheel />}
       <LastTrickModal view={view} />
       <LeaderboardModal view={view} open={lbOpen} onClose={() => setLbOpen(false)} />
       <DeclarerSetupModal view={view} />
@@ -577,8 +657,10 @@ function TimerRing({ active, budgetMs, size, self }: { active: boolean; budgetMs
   );
 }
 
-function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: number; big?: boolean; bubbles: { id: number; seat: number; text: string }[] }) {
+function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: ExtendedView; seat: number; big?: boolean; bubbles: { id: number; seat: number; text: string }[]; muted?: boolean; onToggleMute?: (s: number) => void }) {
   const me = v.viewerSeat;
+  const muteHold = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearHold = () => { if (muteHold.current) { clearTimeout(muteHold.current); muteHold.current = null; } };
   const isTurn = v.turnSeat === seat && (v.phase === "TRICK_PLAY" || v.phase === "BIDDING");
   const isSetup = v.phase === "DECLARER_SETUP" && v.declarerSeat === seat;
   const active = isTurn || isSetup;
@@ -615,6 +697,8 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
 
   return (
     <motion.div ref={(el) => { if (el) seatEls.set(seat, el); }}
+      onPointerDown={() => { if (seat === me || !onToggleMute) return; muteHold.current = setTimeout(() => { onToggleMute(seat); haptic(20); }, 500); }}
+      onPointerUp={clearHold} onPointerLeave={clearHold} onPointerCancel={clearHold}
       animate={{
         scale: active ? 1.1 : 1, y: active ? -3 : 0,
         opacity: anyoneActive && !active ? 0.87 : 1, // non-actors recede gently — dimmed, never "disabled"
@@ -647,6 +731,10 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
         borderRadius: 12, padding: big ? "6px 10px 5px" : "4px 7px 4px",
         borderWidth: 2.5, borderStyle: "solid",
       }}>
+      {muted && (
+        <span title="reactions muted — long-press to unmute" aria-label="reactions muted"
+          style={{ position: "absolute", top: -6, left: -6, zIndex: 12, background: "var(--ink)", color: "#fff", borderRadius: 9, width: 18, height: 18, fontSize: 10, display: "grid", placeItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,.4)" }}>🔇</span>
+      )}
       {/* the unmissable JOIN flash: expanding gold rings + badge the moment this seat is revealed */}
       <AnimatePresence>
         {flash && !REDUCED && (
@@ -741,7 +829,7 @@ function seatPct(rel: number, n: number, rx: number, ry: number): { left: string
   return { left: `${50 + rx * Math.cos(a)}%`, top: `${50 + ry * Math.sin(a)}%` };
 }
 
-function PokerTable({ view: v, bubbles }: { view: ExtendedView; bubbles: { id: number; seat: number; text: string }[] }) {
+function PokerTable({ view: v, bubbles, muted, onToggleMute }: { view: ExtendedView; bubbles: { id: number; seat: number; text: string }[]; muted: Set<number>; onToggleMute: (s: number) => void }) {
   const me = v.viewerSeat;
   const n = v.handCounts.length;
   const rel = (seat: number) => (seat - me + n) % n;
@@ -783,7 +871,7 @@ function PokerTable({ view: v, bubbles }: { view: ExtendedView; bubbles: { id: n
         const pos = seatPct(rel(seat), n, seatRx, seat === me ? 40 : 46);
         return (
           <div key={seat} style={{ position: "absolute", ...pos, transform: "translate(-50%,-50%)", zIndex: 4 }}>
-            <SeatChip view={v} seat={seat} big={seat === me} bubbles={bubbles} />
+            <SeatChip view={v} seat={seat} big={seat === me} bubbles={bubbles} muted={muted.has(seat)} onToggleMute={onToggleMute} />
           </div>
         );
       })}
@@ -1274,7 +1362,7 @@ function ScoresMini({ view: v }: { view: ExtendedView }) {
 // (EmoteBar removed by request — the EMOTE transport stays server-side; bubbles still render if ever re-enabled.)
 
 /* ------------------------------ theater ------------------------------ */
-function useTheater(view: ExtendedView | null, setOverlay: (o: Overlay) => void, setBubbles: React.Dispatch<React.SetStateAction<{ id: number; seat: number; text: string }[]>>, confetti?: () => void) {
+function useTheater(view: ExtendedView | null, setOverlay: (o: Overlay) => void, setBubbles: React.Dispatch<React.SetStateAction<{ id: number; seat: number; text: string }[]>>, confetti?: () => void, muted?: Set<number>) {
   const events = useStore((s) => s.events);
   const processed = useRef(0);
   const bubbleId = useRef(0);
@@ -1354,15 +1442,16 @@ function useTheater(view: ExtendedView | null, setOverlay: (o: Overlay) => void,
         // Table() so it can be deferred past the final trick — see #4. Nothing to cue live here.
         case "GAME_ENDED": sfx.fanfare(); confetti?.(); break;
         case "EMOTE": {
+          if (muted?.has(d.seat)) break; // this seat's reactions are muted for you
           sfx.emote();
           const id = ++bubbleId.current;
-          setBubbles((b) => [...b, { id, seat: d.seat, text: EMOTES[d.emote] ?? "👋" }]);
+          setBubbles((b) => [...b, { id, seat: d.seat, text: EMOTES[d.emote]?.bubble ?? "👋" }]);
           setTimeout(() => setBubbles((b) => b.filter((x) => x.id !== id)), 2200);
           break;
         }
       }
     }
-  }, [events, view, setOverlay, setBubbles]);
+  }, [events, view, setOverlay, setBubbles, muted]);
 }
 
 /* ------------------------------ overlays ------------------------------ */

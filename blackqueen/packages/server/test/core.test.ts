@@ -281,7 +281,7 @@ describe("practice bots", () => {
 });
 
 describe("v1.4 surfaces: emotes, avatars, explicit next round", () => {
-  it("EMOTE broadcasts to all, rate-limits at 1/10s, never bumps stateVersion", () => {
+  it("EMOTE broadcasts to all, rate-limits rapid repeats, never bumps stateVersion", () => {
     const who = turnAccount();
     const v = room.stateVersion;
     room.handleAction(who, "00000000-0000-4000-8000-00000000ee01", v, { type: "EMOTE", payload: { emote: "laugh" } });

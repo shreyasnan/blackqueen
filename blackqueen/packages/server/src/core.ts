@@ -438,7 +438,7 @@ export class RoomCore {
     if (action.type === "EMOTE") {
       const last = this.lastEmoteAt.get(accountId) ?? 0;
       const now = Date.now();
-      if (now - last < 10_000) return rejectPrivate("RATE_LIMITED");
+      if (now - last < 2_000) return rejectPrivate("RATE_LIMITED"); // quick reactions, but spam-guarded
       this.lastEmoteAt.set(accountId, now);
       this.appliedActionIds.set(actionId, {});
       this.broadcastEvent("EMOTE", { seat, emote: action.payload.emote });

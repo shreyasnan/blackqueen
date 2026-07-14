@@ -18,7 +18,7 @@ export const ClientActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("HOST_RESTART_ROUND"), roomId: z.string(), playerId: z.string(), actionId: z.string().uuid(), stateVersion: z.number().int().nonnegative(), payload: z.object({}).strict() }),
   z.object({ type: z.literal("HOST_RESOLVE_PAUSE"), roomId: z.string(), playerId: z.string(), actionId: z.string().uuid(), stateVersion: z.number().int().nonnegative(), payload: z.object({ action: z.enum(["resume", "end"]) }).strict() }),
   // UI_SPEC v1.1 §8: six fixed, non-informational emotes; rate-limited server-side; not order-sensitive
-  z.object({ type: z.literal("EMOTE"), roomId: z.string(), playerId: z.string(), actionId: z.string().uuid(), stateVersion: z.number().int().nonnegative(), payload: z.object({ emote: z.enum(["hello", "wellplayed", "uhoh", "trusted", "laugh", "gg"]) }).strict() }),
+  z.object({ type: z.literal("EMOTE"), roomId: z.string(), playerId: z.string(), actionId: z.string().uuid(), stateVersion: z.number().int().nonnegative(), payload: z.object({ emote: z.enum(["hi", "haha", "wow", "wellplayed", "gg", "bringit", "queen", "soclose", "oops", "phew"]) }).strict() }),
 ]);
 export type ClientAction = z.infer<typeof ClientActionSchema>;
 
