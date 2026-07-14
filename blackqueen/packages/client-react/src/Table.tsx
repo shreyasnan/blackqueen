@@ -66,7 +66,7 @@ function QuickChatWheel() {
           if (open) { setOpen(false); holding.current = false; return; }
           holding.current = true; setHover(null); setOpen(true); sfx.lift();
         }}
-        style={{ position: "absolute", right: 10, bottom: 116, zIndex: 30, width: 50, height: 50, borderRadius: 25, border: "1.5px solid var(--gold)", background: "var(--card)", boxShadow: "0 3px 10px rgba(0,0,0,.28)", fontSize: 24, cursor: "pointer", display: "grid", placeItems: "center" }}>
+        style={{ position: "absolute", right: 12, bottom: 184, zIndex: 30, width: 48, height: 48, borderRadius: 24, border: "1.5px solid var(--gold)", background: "var(--card)", boxShadow: "0 3px 10px rgba(0,0,0,.28)", fontSize: 23, cursor: "pointer", display: "grid", placeItems: "center", opacity: 0.94 }}>
         😊
       </button>
       {open && (
