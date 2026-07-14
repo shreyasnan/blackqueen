@@ -5,7 +5,7 @@ import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-29-smart-bots"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-30-corridor-redesign"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -39,14 +39,16 @@ export function App() {
 
   if (screen === "table") return <Table />;
   return (
-    <div style={{ maxWidth: 520, margin: "0 auto", padding: 20 }}>
-      <h1 style={{ fontSize: 26, margin: "18px 0" }}>
-        Black <span style={{ color: "var(--gold)" }}>Queen</span>
-      </h1>
-      <p style={{ color: "var(--ink-soft)", marginBottom: 18 }}>
-        Hidden teams. Trust no one.
-        <span style={{ float: "right", fontSize: 11, opacity: 0.45 }}>{BUILD_TAG}</span>
-      </p>
+    <div style={{ maxWidth: 440, margin: "0 auto", padding: "clamp(16px,4vw,26px)", fontFamily: SANS }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, margin: "8px 0 20px" }}>
+        <h1 style={{ fontFamily: SERIF, fontSize: "clamp(25px,7vw,31px)", fontWeight: 700, margin: 0, letterSpacing: 0.2 }}>
+          Black <span style={{ color: "var(--gold)" }}>Queen</span>
+        </h1>
+        <span style={{ fontSize: 10.5, opacity: 0.4, whiteSpace: "nowrap" }}>{BUILD_TAG}</span>
+      </div>
+      {screen === "auth" && (
+        <p style={{ color: "var(--ink-soft)", marginBottom: 18, fontSize: 14.5 }}>Hidden teams. Trust no one.</p>
+      )}
       {screen === "auth" && <AuthScreen invited={pendingJoin !== null} onAuthed={(a) => { setAuthed(a); setScreen("home"); }} />}
       {screen === "home" && authed && <Home auth={authed} />}
       {screen === "lobby" && authed && <Lobby auth={authed} />}
@@ -136,70 +138,77 @@ function Home({ auth }: { auth: AuthState }) {
     saveProfile(face, n);
     return { displayName: n, avatar: face };
   };
+  const isGuestNick = /^guest$/i.test(nick.trim());
+  const create = async () => {
+    try {
+      const me = identity();
+      // Create the room first (defaults: 1 deck); the host picks decks & partners in the lobby.
+      const r = await api<{ roomId: string; code: string }>("/api/rooms", { N: 8, ...me });
+      setRoomInfo({ roomId: r.roomId, code: r.code, members: [{ accountId: auth.accountId, displayName: me.displayName, avatar: me.avatar }], host: auth.accountId });
+      setScreen("lobby");
+    } catch (e) { pushToast(String(e)); }
+  };
+  const join = async () => {
+    try {
+      const r = await api<{ roomId: string; members: any[]; host: string }>("/api/rooms/join", { code, ...identity() });
+      setRoomInfo({ roomId: r.roomId, code: null, members: r.members, host: r.host });
+      setScreen("lobby");
+    } catch { pushToast("Invalid or expired code"); }
+  };
   return (
-    <div>
-      <p style={{ marginBottom: 12 }}>
-        Signed in as <b>{auth.name}</b>{" "}
-        <button style={{ ...btnSec, padding: "4px 10px" }} onClick={signOut}>Sign out</button>
-      </p>
+    <div style={{ fontFamily: SANS }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, fontSize: 13.5, color: "var(--ink-soft)" }}>
+        <span>Signed in as <b style={{ color: "var(--ink)" }}>{auth.name}</b></span>
+        <button onClick={signOut} style={{ background: "transparent", border: 0, color: "var(--ink-soft)", cursor: "pointer", fontSize: 13.5, textDecoration: "underline", padding: 4 }}>Sign out</button>
+      </div>
 
-      {/* ---- your table identity: face + nickname for this game ---- */}
-      <div style={{ background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 12, padding: 12, marginBottom: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, color: "var(--ink-soft)", marginBottom: 8 }}>PLAYING AS</div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+      {/* ---- your table identity: face + nickname ---- */}
+      <div style={{ ...surfaceCard, padding: 16, marginBottom: 16 }}>
+        <div style={labelCaps}>Playing as</div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10 }}>
           <button onClick={() => setPickerOpen((x) => !x)} aria-label="choose face"
-            style={{ width: 54, height: 54, borderRadius: 27, background: "var(--parchment)", border: "2.5px solid var(--gold)", cursor: "pointer", display: "grid", placeItems: "center" }}>
-            <Face id={face} size={40} />
+            style={{ width: 56, height: 56, borderRadius: 28, background: "var(--parchment)", border: "2px solid var(--gold)", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, padding: 0 }}>
+            <Face id={face} size={42} />
           </button>
-          <input value={nick} onChange={(e) => setNick(e.target.value)} maxLength={20} placeholder="table nickname"
+          <input value={nick} onChange={(e) => setNick(e.target.value)} maxLength={20} placeholder="Table nickname"
             autoFocus={nick === "Guest"} onFocus={(e) => nick === "Guest" && e.target.select()}
-            style={{ ...inp, flex: 1, fontWeight: 700, border: /^guest$/i.test(nick.trim()) ? "2px solid var(--coral)" : (inp as any).border }} />
+            style={{ ...field, flex: 1, fontWeight: 600, borderColor: isGuestNick ? "var(--coral)" : (field.border as string) }} />
         </div>
-        {/^guest$/i.test(nick.trim()) && (
-          <div style={{ fontSize: 11.5, color: "var(--coral)", fontWeight: 700, marginTop: 5 }}>
-            pick a nickname so friends recognize you at the table
+        {isGuestNick && (
+          <div style={{ fontSize: 12, color: "var(--coral)", fontWeight: 500, marginTop: 8 }}>
+            Pick a nickname so friends recognize you at the table.
           </div>
         )}
         {pickerOpen && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6, marginTop: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6, marginTop: 12 }}>
             {FACE_IDS.map((f) => (
               <button key={f} onClick={() => { setFace(f); setPickerOpen(false); saveProfile(f, nick); }} title={f}
                 style={{
-                  padding: "6px 0 2px", borderRadius: 10, cursor: "pointer", display: "grid", placeItems: "center",
-                  background: f === face ? "var(--gold)" : "transparent", border: f === face ? "2px solid var(--ink)" : "2px solid rgba(59,34,71,.12)",
+                  padding: "6px 0 3px", borderRadius: 12, cursor: "pointer", display: "grid", placeItems: "center", gap: 1,
+                  background: f === face ? "rgba(201,153,46,.16)" : "transparent", border: f === face ? "2px solid var(--gold)" : "1px solid rgba(59,34,71,.1)",
                 }}>
-                <Face id={f} size={46} />
-                <span style={{ fontSize: 9.5, color: f === face ? "#fff" : "var(--ink-soft)", fontWeight: 700 }}>{f}</span>
+                <Face id={f} size={42} />
               </button>
             ))}
           </div>
         )}
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <button style={{ ...btn, padding: "14px" }} onClick={async () => {
-          try {
-            const me = identity();
-            // Create the room first (defaults: 1 deck). The host picks decks & partners in the lobby,
-            // once people have joined — so table rules aren't decided before anyone's here.
-            const r = await api<{ roomId: string; code: string }>("/api/rooms", { N: 8, ...me });
-            setRoomInfo({ roomId: r.roomId, code: r.code, members: [{ accountId: auth.accountId, displayName: me.displayName, avatar: me.avatar }], host: auth.accountId });
-            setScreen("lobby");
-          } catch (e) { pushToast(String(e)); }
-        }}>Create table</button>
-        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", textAlign: "center", marginTop: -2 }}>
-          you'll pick decks & partner cards in the lobby, after friends join
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="INVITE CODE" style={{ ...inp, letterSpacing: 3, flex: 1 }} />
-          <button style={btnSec} onClick={async () => {
-            try {
-              const r = await api<{ roomId: string; members: any[]; host: string }>("/api/rooms/join", { code, ...identity() });
-              setRoomInfo({ roomId: r.roomId, code: null, members: r.members, host: r.host });
-              setScreen("lobby");
-            } catch (e) { pushToast("Invalid or expired code"); }
-          }}>Join</button>
-        </div>
+      <button style={primaryBtn} onClick={create}>Create table</button>
+      <div style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", marginTop: 10 }}>
+        You'll pick decks and partner cards in the lobby, after friends join.
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "22px 0 16px", color: "var(--ink-soft)", fontSize: 12.5 }}>
+        <div style={{ flex: 1, height: 1, background: "rgba(59,34,71,.12)" }} />
+        or join a table
+        <div style={{ flex: 1, height: 1, background: "rgba(59,34,71,.12)" }} />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="INVITE CODE"
+          onKeyDown={(e) => e.key === "Enter" && code.length === 6 && join()}
+          style={{ ...field, flex: 1, letterSpacing: 4, fontWeight: 600 }} />
+        <button style={{ ...inkBtn, flexShrink: 0, borderRadius: 14 }} onClick={join}>Join</button>
       </div>
     </div>
   );
@@ -236,126 +245,144 @@ function Lobby({ auth }: { auth: AuthState }) {
 
   if (!roomInfo) return null;
   const isHost = roomInfo.host === auth.accountId;
+  const members = roomInfo.members;
+  const effDeck = (isHost ? deckCount : ((roomInfo as any).deckCount ?? 1)) as 1 | 2;
+  const effHand = (isHost ? handSize : ((roomInfo as any).handSize ?? "all")) as number | "all";
+  const minPlayers = effDeck === 2 ? 6 : 4;
+  const short = minPlayers - members.length;
+  const ghosts = Math.max(0, Math.min(7, minPlayers) - members.length);
   const leaveLobby = async () => {
-    if (!window.confirm(isHost && roomInfo.members.length > 1 ? "Leave? Someone else becomes host." : "Leave this lobby?")) return;
+    if (!window.confirm(isHost && members.length > 1 ? "Leave? Someone else becomes host." : "Leave this lobby?")) return;
     try { await api(`/api/rooms/${roomInfo.roomId}/leave`, {}); } catch { /* best effort */ }
     useStore.getState().resetToHome();
   };
+  const copyCode = () => { if (roomInfo.code) { navigator.clipboard?.writeText(roomInfo.code); pushToast("Code copied"); } };
+  const shareLink = () => {
+    const link = `${location.origin}/?join=${roomInfo.code}`;
+    if (navigator.share) navigator.share({ title: "Black Queen", text: "Join my table:", url: link }).catch(() => {});
+    else { navigator.clipboard?.writeText(link); pushToast("Invite link copied"); }
+  };
+  const start = async () => {
+    setStarting(true);
+    try { await api(`/api/rooms/${roomInfo.roomId}/start`, {}); connect(roomInfo.roomId); }
+    catch (e) { pushToast(`Couldn't start: ${e instanceof Error ? e.message : e}`); setStarting(false); }
+  };
+
   return (
-    <div>
+    <div style={{ fontFamily: SANS }}>
+      <div style={{ marginBottom: 12 }}>
+        <button onClick={leaveLobby} aria-label="leave lobby"
+          style={{ background: "transparent", border: 0, color: "var(--ink-soft)", cursor: "pointer", fontSize: 13.5, padding: 4, display: "inline-flex", alignItems: "center", gap: 5 }}>← Leave</button>
+      </div>
+
       {roomInfo.code && (
-        <div style={{ textAlign: "center", margin: "14px 0" }}>
-          <button onClick={leaveLobby} aria-label="leave lobby"
-            style={{ ...btnSec, padding: "4px 10px", fontSize: 12, float: "left" }}>↩ leave</button>
-          <div style={{ color: "var(--ink-soft)" }}>Invite code</div>
-          <div style={{ fontSize: 42, letterSpacing: 8, fontWeight: 700, cursor: "pointer" }}
-               onClick={() => { navigator.clipboard?.writeText(roomInfo.code!); pushToast("Code copied"); }}>
+        <div style={{ ...surfaceCard, padding: 20, textAlign: "center", marginBottom: 16 }}>
+          <div style={labelCaps}>Invite code</div>
+          <div onClick={copyCode} title="Tap to copy"
+            style={{ fontFamily: SERIF, fontSize: "clamp(30px,10vw,40px)", letterSpacing: 8, paddingLeft: 8, cursor: "pointer", marginTop: 6, lineHeight: 1 }}>
             {roomInfo.code}
           </div>
-          <button style={{ ...btn, padding: "10px 20px", marginTop: 6 }}
-            onClick={() => {
-              const link = `${location.origin}/?join=${roomInfo.code}`;
-              if (navigator.share) navigator.share({ title: "Black Queen", text: "Join my table:", url: link }).catch(() => {});
-              else { navigator.clipboard?.writeText(link); pushToast("Invite link copied — one tap seats them"); }
-            }}>
-            🔗 Share invite link
-          </button>
-          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>the link signs them in (or seats them as a guest) and joins automatically</div>
+          <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+            <button onClick={copyCode} style={{ ...ghostBtn, width: "auto", flex: "0 0 auto", padding: "12px 18px" }}>Copy</button>
+            <button onClick={shareLink} style={{ ...inkBtn, flex: 1, borderRadius: 14 }}>Share invite link</button>
+          </div>
         </div>
       )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
-        {roomInfo.members.map((m) => (
-          <span key={m.accountId} style={{ background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 16, padding: "6px 12px" }}>
-            {(m as any).avatar && <><Face id={(m as any).avatar} size={20} />{" "}</>}{m.displayName}{(m as any).isBot ? " 🤖" : ""}{m.accountId === roomInfo.host ? " ♛" : ""}
-          </span>
+
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "22px 4px 12px" }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>Players</div>
+        <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>{members.length} of {minPlayers} seated</div>
+      </div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {members.map((m) => (
+          <div key={m.accountId} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7, width: 68 }}>
+            <div style={{ position: "relative", width: 52, height: 52, borderRadius: 26, background: "var(--parchment)", display: "grid", placeItems: "center", border: "1px solid rgba(59,34,71,.08)" }}>
+              <Face id={(m as any).avatar || "classic"} size={44} />
+              {m.accountId === roomInfo.host && (
+                <span title="host" style={{ position: "absolute", top: -4, right: -4, width: 20, height: 20, borderRadius: 10, background: "var(--gold)", color: "#fff", display: "grid", placeItems: "center", fontSize: 11 }}>♛</span>
+              )}
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--ink)", maxWidth: 68, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {(m as any).isBot ? "🤖 " : ""}{m.displayName.split(" ")[0]}
+            </div>
+          </div>
+        ))}
+        {Array.from({ length: ghosts }).map((_, i) => (
+          <div key={`g${i}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7, width: 68 }}>
+            <div style={{ width: 52, height: 52, borderRadius: 26, border: "1.6px dashed rgba(59,34,71,.22)" }} />
+            <div style={{ fontSize: 12.5, color: "rgba(59,34,71,.35)" }}>Open</div>
+          </div>
         ))}
       </div>
-      <p style={{ color: "var(--ink-soft)", marginBottom: 10 }}>
-        {roomInfo.members.length} / {(roomInfo as any).deckCount === 2 ? "6–7" : "4–7"} players
-        {(roomInfo as any).deckCount === 2 && <b style={{ color: "var(--gold)" }}> · 2 decks · 300 pts · {(roomInfo as any).calledCount ?? 2} partner card{((roomInfo as any).calledCount ?? 2) > 1 ? "s" : ""}</b>}
-        {(roomInfo as any).handSize != null && <> · <b>{(roomInfo as any).handSize} cards each</b> (clamped to the table if needed)</>}
-      </p>
 
-      {/* Table rules — host picks decks & partners here, in the lobby, once people have joined */}
+      {/* Table rules — host picks decks & partners here, once people have joined */}
       {isHost ? (
-        <div style={{ background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 12, padding: 12, marginBottom: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, color: "var(--ink-soft)", marginBottom: 8 }}>TABLE RULES</div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <button onClick={() => { setDeckCount(1); setHandSize("all"); pushConfig(1, calledCount, "all"); }} style={{ ...(deckCount === 1 ? btn : btnSec), padding: "8px 14px" }}>1 deck · 150 pts</button>
-            <button onClick={() => { const hs = handSize === "all" ? 12 : handSize; setDeckCount(2); setHandSize(hs); pushConfig(2, calledCount, hs); }} style={{ ...(deckCount === 2 ? btn : btnSec), padding: "8px 14px" }}>2 decks · 300 pts</button>
-            {deckCount === 2 && (
-              <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
-                partner cards:
-                {[1, 2, 3].map((n) => (
-                  <button key={n} onClick={() => { setCalledCount(n); pushConfig(2, n, handSize); }}
-                    style={{ ...(calledCount === n ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>{n}</button>
-                ))}
-              </span>
-            )}
-          </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 13, marginTop: 8 }}>
-            cards per hand:
-            {(deckCount === 2 ? [10, 11, 12, 13, 14] : [8, 9, 10]).map((n) => (
-              <button key={n} onClick={() => { setHandSize(n); pushConfig(deckCount, calledCount, n); }}
-                style={{ ...(handSize === n ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>{n}</button>
-            ))}
-            <button onClick={() => { setHandSize("all"); pushConfig(deckCount, calledCount, "all"); }}
-              style={{ ...(handSize === "all" ? btn : btnSec), padding: "5px 11px", fontSize: 13 }}>whole deck</button>
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
-            {handSize !== "all"
-              ? <>extra cards are trimmed before the deal — lowest ranks first, <b>never point cards</b> (5s, 10s, Aces, Q♠), so the total stays {deckCount === 2 ? 300 : 150}. If the table can't fit {handSize}, the nearest legal size is used.</>
-              : <>every card is dealt — hand size depends on the player count.</>}
-          </div>
+        <div style={{ ...surfaceCard, padding: 18, margin: "20px 0" }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 13 }}>Table rules</div>
+          <Segmented full value={deckCount}
+            onChange={(v) => {
+              if (v === 1) { setDeckCount(1); setHandSize("all"); pushConfig(1, calledCount, "all"); }
+              else { const hs = handSize === "all" ? 12 : handSize; setDeckCount(2); setHandSize(hs); pushConfig(2, calledCount, hs); }
+            }}
+            options={[{ label: "1 deck · 150", value: 1 }, { label: "2 decks · 300", value: 2 }]} />
+
           {deckCount === 2 && (
-            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
-              two of every card · needs <b>6–7 players</b> · the <b>first player to play</b> a called card becomes the partner
-              {calledCount === 3 && <span style={{ color: "var(--coral)", fontWeight: 700 }}> · 3 partner cards = big swings (±4× the bid)</span>}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 7 }}>Partner cards</div>
+              <Segmented full value={calledCount} onChange={(v) => { const n = Number(v); setCalledCount(n); pushConfig(2, n, handSize); }}
+                options={[1, 2, 3].map((n) => ({ label: String(n), value: n }))} />
             </div>
           )}
+
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 7 }}>Cards per hand</div>
+            <Segmented full small value={handSize}
+              onChange={(v) => { const hs = v === "all" ? "all" : Number(v); setHandSize(hs); pushConfig(deckCount, calledCount, hs); }}
+              options={[...(deckCount === 2 ? [10, 11, 12, 13, 14] : [8, 9, 10]).map((n) => ({ label: String(n), value: n })), { label: "All", value: "all" }]} />
+          </div>
+
+          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 12, lineHeight: 1.5 }}>
+            {deckCount === 2
+              ? <>Two of every card · needs 6–7 players · the first to play a called card joins your team.{calledCount === 3 && <span style={{ color: "var(--coral)" }}> Three partner cards means big swings.</span>}</>
+              : handSize !== "all"
+                ? <>Extra cards are trimmed before the deal — lowest ranks first, never point cards — so the total stays 150.</>
+                : <>Every card is dealt — hand size depends on the player count.</>}
+          </div>
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 12 }}>
-          the host sets the table rules — waiting on them to choose decks & partners.
+        <div style={{ ...surfaceCard, padding: 16, margin: "20px 0", textAlign: "center" }}>
+          <div style={{ fontSize: 13.5, color: "var(--ink-soft)" }}>The host sets the table rules.</div>
+          <div style={{ fontSize: 14.5, fontWeight: 500, marginTop: 6 }}>
+            {effDeck === 2 ? "2 decks · 300 pts" : "1 deck · 150 pts"}{effHand != null && effHand !== "all" ? ` · ${effHand} cards each` : ""}
+          </div>
         </div>
       )}
+
       {isHost && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <button style={btnSec} disabled={roomInfo.members.length >= 7}
-            onClick={async () => { try { await api(`/api/rooms/${roomInfo.roomId}/addbot`, {}); } catch (e) { pushToast(String(e)); } }}>
-            + Add bot
-          </button>
-          {roomInfo.members.some((m: any) => m.isBot) && (
-            <button style={btnSec} onClick={async () => { try { await api(`/api/rooms/${roomInfo.roomId}/removebot`, {}); } catch { /* none */ } }}>
-              − Remove bot
+        <>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <button style={{ ...ghostBtn, opacity: members.length >= 7 ? 0.5 : 1 }} disabled={members.length >= 7}
+              onClick={async () => { try { await api(`/api/rooms/${roomInfo.roomId}/addbot`, {}); } catch (e) { pushToast(String(e)); } }}>
+              Add a bot
             </button>
-          )}
-        </div>
-      )}
-      {isHost && (() => {
-        // U1: a 2-deck table needs 6–7 players — gate the button and SAY WHY, never fail silently
-        const minPlayers = (roomInfo as any).deckCount === 2 ? 6 : 4;
-        const short = minPlayers - roomInfo.members.length;
-        return (
-          <>
-            <button style={{ ...btn, opacity: short <= 0 ? 1 : 0.4 }} disabled={short > 0 || starting}
-              onClick={async () => {
-                setStarting(true);
-                try { await api(`/api/rooms/${roomInfo.roomId}/start`, {}); connect(roomInfo.roomId); }
-                catch (e) { pushToast(`Couldn't start: ${e instanceof Error ? e.message : e}`); setStarting(false); }
-              }}>
-              Start game
-            </button>
-            {short > 0 && (
-              <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
-                {(roomInfo as any).deckCount === 2
-                  ? <>2-deck games need <b>6–7 players</b> — add {short} more (bots count!)</>
-                  : <>need {short} more player{short > 1 ? "s" : ""} (bots count!)</>}
-              </div>
+            {members.some((m: any) => m.isBot) && (
+              <button style={{ ...ghostBtn, width: "auto", flex: "0 0 auto", padding: "13px 18px" }}
+                onClick={async () => { try { await api(`/api/rooms/${roomInfo.roomId}/removebot`, {}); } catch { /* none */ } }}>
+                Remove
+              </button>
             )}
-          </>
-        );
-      })()}
+          </div>
+          <button style={{ ...primaryBtn, opacity: short > 0 || starting ? 0.5 : 1 }} disabled={short > 0 || starting} onClick={start}>
+            {starting ? "Starting…" : "Start game"}
+          </button>
+          <div style={{ textAlign: "center", fontSize: 12.5, color: "var(--ink-soft)", marginTop: 10 }}>
+            {short > 0 ? <>Add {short} more player{short > 1 ? "s" : ""} to begin — bots count.</> : <>Everyone's here. Deal them in.</>}
+          </div>
+        </>
+      )}
+      {!isHost && (
+        <div style={{ textAlign: "center", fontSize: 13, color: "var(--ink-soft)", marginTop: 8 }}>Waiting for the host to start…</div>
+      )}
     </div>
   );
 }
@@ -363,3 +390,37 @@ function Lobby({ auth }: { auth: AuthState }) {
 export const btn: React.CSSProperties = { background: "var(--gold)", color: "#fff", border: 0, borderRadius: 8, padding: "10px 16px", fontWeight: 700, cursor: "pointer" };
 export const btnSec: React.CSSProperties = { background: "var(--ink)", color: "var(--parchment)", border: 0, borderRadius: 8, padding: "10px 16px", cursor: "pointer" };
 export const inp: React.CSSProperties = { background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 8, padding: "10px" };
+
+/* ---- v3 corridor design (Home/Lobby): clean sans UI, serif wordmark, soft surfaces, mobile-first ---- */
+const SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+const SERIF = "Georgia, 'Iowan Old Style', 'Times New Roman', serif";
+const surfaceCard: React.CSSProperties = { background: "var(--card)", border: "1px solid rgba(59,34,71,.08)", borderRadius: 20, boxShadow: "0 2px 16px rgba(40,20,50,.05)" };
+const primaryBtn: React.CSSProperties = { width: "100%", background: "var(--gold)", color: "#fff", border: 0, borderRadius: 15, padding: "15px", fontSize: 16, fontWeight: 600, cursor: "pointer", boxShadow: "0 4px 14px rgba(184,137,43,.28)" };
+const inkBtn: React.CSSProperties = { background: "var(--ink)", color: "#f7efe1", border: 0, borderRadius: 14, padding: "13px 18px", fontSize: 14.5, fontWeight: 500, cursor: "pointer" };
+const ghostBtn: React.CSSProperties = { width: "100%", background: "transparent", border: "1px solid rgba(59,34,71,.16)", color: "var(--ink-soft)", borderRadius: 15, padding: "13px", fontSize: 14.5, cursor: "pointer" };
+const field: React.CSSProperties = { width: "100%", background: "var(--card)", border: "1px solid rgba(59,34,71,.14)", borderRadius: 14, padding: "13px 15px", fontSize: 15.5, minHeight: 50, color: "var(--ink)", fontFamily: SANS };
+const labelCaps: React.CSSProperties = { fontSize: 11, fontWeight: 600, letterSpacing: 1.4, textTransform: "uppercase", color: "var(--ink-soft)" };
+
+function Segmented({ options, value, onChange, full, small }: {
+  options: { label: React.ReactNode; value: string | number }[];
+  value: string | number; onChange: (v: string | number) => void; full?: boolean; small?: boolean;
+}) {
+  return (
+    <div style={{ display: full ? "flex" : "inline-flex", width: full ? "100%" : undefined, background: "rgba(59,34,71,.06)", borderRadius: 12, padding: 3, gap: 2 }}>
+      {options.map((o) => {
+        const sel = o.value === value;
+        return (
+          <button key={String(o.value)} onClick={() => onChange(o.value)}
+            style={{
+              flex: full ? 1 : undefined, border: 0, cursor: "pointer", borderRadius: 9, fontFamily: SANS,
+              padding: small ? "7px 10px" : "9px 12px", fontSize: small ? 13 : 13.5, fontWeight: sel ? 600 : 400, whiteSpace: "nowrap",
+              background: sel ? "var(--card)" : "transparent", color: sel ? "var(--ink)" : "var(--ink-soft)",
+              boxShadow: sel ? "0 1px 3px rgba(40,20,50,.14)" : "none", transition: "background .15s ease",
+            }}>
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
