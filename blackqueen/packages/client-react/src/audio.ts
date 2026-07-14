@@ -54,17 +54,17 @@ function unlock(): void {
   });
 }
 if (typeof window !== "undefined") {
+  const EVENTS = ["touchend", "pointerdown", "click", "keydown"] as const;
   const tryUnlock = () => {
     unlock();
     if (ctx?.state === "running") { // done — stop listening
-      window.removeEventListener("touchend", tryUnlock);
-      window.removeEventListener("pointerdown", tryUnlock);
-      window.removeEventListener("keydown", tryUnlock);
+      for (const ev of EVENTS) window.removeEventListener(ev, tryUnlock, true);
     }
   };
-  window.addEventListener("touchend", tryUnlock, { passive: true });
-  window.addEventListener("pointerdown", tryUnlock, { passive: true });
-  window.addEventListener("keydown", tryUnlock);
+  // Capture phase (true): fire BEFORE any app handler that might stopPropagation — on Chrome mobile the
+  // context only resumes inside a gesture, so we must never miss the very first tap. `click` is added
+  // because some mobile browsers deliver it more reliably than touchend/pointerdown.
+  for (const ev of EVENTS) window.addEventListener(ev, tryUnlock, { capture: true, passive: true } as AddEventListenerOptions);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && ctx?.state === "suspended") void ctx.resume();
   });

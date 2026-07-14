@@ -75,6 +75,7 @@ export function Table() {
   const [bubbles, setBubbles] = useState<{ id: number; seat: number; text: string }[]>([]);
   const [burst, setBurst] = useState(0);
   const [lbOpen, setLbOpen] = useState(false);
+  const [gameEndAck, setGameEndAck] = useState(false); // #3: show the final verdict before the standings
   const wide = useWide();
   useTheater(view, setOverlay, setBubbles, () => setBurst((b) => b + 1));
   const [, force] = useState(0);
@@ -89,7 +90,10 @@ export function Table() {
     const v2 = view;
     if (!v2) return;
     const delta = v2.lastRoundDelta;
-    if (v2.phase === "ROUND_END" && delta && dismissedRound.current !== v2.roundNumber && shownRound.current !== v2.roundNumber) {
+    // #3: the natural end of the LAST round jumps straight to GAME_END — show its verdict too, so the
+    // final hand isn't swallowed by the standings screen. Pause/abort ends go straight to standings.
+    const finalEnd = v2.phase === "GAME_END" && v2.roundNumber >= v2.N;
+    if ((v2.phase === "ROUND_END" || finalEnd) && delta && dismissedRound.current !== v2.roundNumber && shownRound.current !== v2.roundNumber) {
       shownRound.current = v2.roundNumber;
       const success = v2.lastRoundSuccess ?? false;
       const pts = v2.revealedTeamMembers.reduce((s, seat) => s + (v2.perPlayerCapturedPoints[seat] ?? 0), 0);
@@ -99,12 +103,15 @@ export function Table() {
         setOverlay({ type: "round", success, pts, delta, solo });
       }, ROUND_VERDICT_DELAY);
     }
-    if (v2.phase !== "ROUND_END") { if (dismissedRound.current !== v2.roundNumber) dismissedRound.current = 0; shownRound.current = 0; }
+    if (v2.phase !== "ROUND_END" && v2.phase !== "GAME_END") { if (dismissedRound.current !== v2.roundNumber) dismissedRound.current = 0; shownRound.current = 0; }
   }, [view]);
   if (!view) return <Center>Connecting…</Center>;
   const isHost = view.hostSeat === view.viewerSeat;
 
-  if (view.phase === "GAME_END") {
+  // Natural final-round end lingers on the table (last trick + verdict) until dismissed; other ends
+  // (pause/abort, or after the verdict is acknowledged) go straight to the standings.
+  const naturalFinalEnd = view.phase === "GAME_END" && view.roundNumber >= view.N && view.lastRoundDelta != null;
+  if (view.phase === "GAME_END" && (gameEndAck || !naturalFinalEnd)) {
     return (
       <Shell wide={false}>
         <GameEnd view={view} />
@@ -129,7 +136,7 @@ export function Table() {
       <LastTrickModal view={view} />
       <LeaderboardModal view={view} open={lbOpen} onClose={() => setLbOpen(false)} />
       <DeclarerSetupModal view={view} />
-      <SetPiece overlay={overlay} view={view} onDismiss={() => { dismissedRound.current = view.roundNumber; setOverlay(null); }} />
+      <SetPiece overlay={overlay} view={view} onDismiss={() => { dismissedRound.current = view.roundNumber; setOverlay(null); if (view.phase === "GAME_END") setGameEndAck(true); }} />
       <Confetti burst={burst} />
       <FlightLayer />
       {connection === "reconnecting" && <Banner>Reconnecting…</Banner>}
@@ -423,14 +430,7 @@ function HUD({ view: v, onMute, onLeaderboard }: { view: ExtendedView; onMute: (
   const stagedConfirmed = useStore((s) => s.stagedConfirmed);
   const me = v.viewerSeat;
   const isDeclarer = v.declarerSeat === me;
-
-  const turnText =
-    v.phase === "BIDDING" ? (v.turnSeat === me ? "Your bid" : `${nameOf(v, v.turnSeat!)} is bidding…`)
-    : v.phase === "DECLARER_SETUP" ? (isDeclarer ? "Set up your bid" : `${nameOf(v, v.declarerSeat!)} is scheming…`)
-    : v.phase === "TRICK_PLAY" ? (v.turnSeat === me ? "Your turn" : `${nameOf(v, v.turnSeat!)}…`)
-    : v.phase === "PAUSED" ? "Paused"
-    : v.phase === "ROUND_END" ? "Round complete"
-    : "";
+  // Whose turn it is now lives in the center of the table (FeltStatus), not in a top banner.
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", padding: "4px 2px", gap: 8 }}>
@@ -454,10 +454,7 @@ function HUD({ view: v, onMute, onLeaderboard }: { view: ExtendedView; onMute: (
           ROUND {v.roundNumber}<span style={{ opacity: 0.5 }}>/{v.N}</span>
         </div>
       </div>
-      <motion.div key={turnText} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-        style={{ fontWeight: 800, fontSize: 15, color: v.turnSeat === me || (v.phase === "DECLARER_SETUP" && isDeclarer) ? "var(--gold)" : "var(--ink)" }}>
-        {turnText}
-      </motion.div>
+      <div />
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
         {v.Y !== null && (
           <div style={{
@@ -476,13 +473,6 @@ function HUD({ view: v, onMute, onLeaderboard }: { view: ExtendedView; onMute: (
               </span>
             ))}
           </div>
-        )}
-        {v.completedTricks.length > 0 && ( // mobile review #4: icon-only on phones, same footprint as mute
-          <button aria-label="review last hand" title="Last hand (T)"
-            style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, whiteSpace: "nowrap" }}
-            onClick={() => useStore.getState().setLastTrickOpen(true)}>
-            {wide ? "🕐 last hand" : "🕐"}
-          </button>
         )}
         <button aria-label="leaderboard" title="Leaderboard — everyone's score" onClick={onLeaderboard}
           style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -608,14 +598,18 @@ function SeatChip({ view: v, seat, big, bubbles }: { view: ExtendedView; seat: n
   useEffect(() => {
     const was = wasTeam.current;
     wasTeam.current = team;
-    if (team && !was) { setFlash(true); const t = setTimeout(() => setFlash(false), 1600); return () => clearTimeout(t); }
+    // A partner JOINS; the declarer is seeded into the team at CALL_CARDS and must NOT flash "joins the
+    // team" (they're the one who called, not a revealed partner) — the contract overlay announces the bid.
+    if (team && !was && seat !== v.declarerSeat) { setFlash(true); const t = setTimeout(() => setFlash(false), 1600); return () => clearTimeout(t); }
   }, [team]);
   const relation =
     seat === me ? (team && seat !== v.declarerSeat ? "partner (you)" : seat === v.declarerSeat ? "declarer (you)" : side === "def" ? "defender (you)" : null) :
     team && seat !== v.declarerSeat ? (iAmTeam ? "your partner" : "partner") :
     seat === v.declarerSeat ? (iAmTeam && me !== v.declarerSeat ? "your declarer" : "declarer") :
     side === "def" ? "defender" : null;
-  const away = v.seatConnected?.[seat] === false;
+  // Never show your OWN seat as away — if you're looking at the screen you're clearly here (the server's
+  // socket flag can lag on mobile after backgrounding). Only other seats show 💤 on disconnect.
+  const away = seat !== me && v.seatConnected?.[seat] === false;
   const wideChip = useWide();
   const avSize = big ? 34 : 27; // compact plates: cards are the stars, squares stay supporting cast
 
@@ -755,7 +749,8 @@ function PokerTable({ view: v, bubbles }: { view: ExtendedView; bubbles: { id: n
   // mobile review #3 (round 2): rx 44% pushed the side plates' text off the viewport — tuck them in.
   const seatRx = wide ? 44 : 39;
   return (
-    <div style={{ flex: 1, minHeight: 300, position: "relative", margin: "2px 0" }}>
+    <div style={{ flex: 1, minHeight: 300, position: "relative", margin: "2px 0", paddingTop: 22 }}>
+      {/* paddingTop pushes the seats down so the top seat's turn-pointer clears the partner banner */}
       {/* rail */}
       <div style={{
         position: "absolute", inset: "6% 2%", borderRadius: "50% / 42%",
@@ -808,26 +803,33 @@ function WatermarkQueen() {
 }
 
 function FeltStatus({ view: v }: { view: ExtendedView }) {
-  let line: string | null = null;
-  if (v.phase === "BIDDING" && v.currentHighBid !== null && v.currentHighBidderSeat !== null) {
-    line = `high bid ${v.currentHighBid} · ${v.currentHighBidderSeat === v.viewerSeat ? "you" : firstName(v, v.currentHighBidderSeat)}`;
-  } else if (v.phase === "DECLARER_SETUP" && v.declarerSeat !== null && v.declarerSeat !== v.viewerSeat) {
-    line = `${firstName(v, v.declarerSeat)} is setting up their bid…`;
+  // The table's own status line — replaces the old top banner. Shows whose turn it is (bidding /
+  // trick play), plus the running high bid during the auction.
+  const me = v.viewerSeat;
+  const mine = v.turnSeat === me;
+  let main: string | null = null;
+  let sub: string | null = null;
+  if (v.phase === "BIDDING") {
+    main = mine ? "Your bid" : v.turnSeat != null ? `${firstName(v, v.turnSeat)} is bidding` : null;
+    if (v.currentHighBid != null && v.currentHighBidderSeat != null) {
+      sub = `high bid ${v.currentHighBid} · ${v.currentHighBidderSeat === me ? "you" : firstName(v, v.currentHighBidderSeat)}`;
+    }
+  } else if (v.phase === "DECLARER_SETUP") {
+    main = v.declarerSeat != null && v.declarerSeat !== me ? `${firstName(v, v.declarerSeat)} is choosing trump & a card…` : null;
+  } else if (v.phase === "TRICK_PLAY") {
+    main = mine ? "Your turn" : v.turnSeat != null ? `${firstName(v, v.turnSeat)}'s turn` : null;
   } else if (v.phase === "PAUSED") {
-    line = "⏸ paused";
-  } else if (v.phase === "ROUND_END" && v.roundNumber < v.N && v.hostSeat !== null && v.hostSeat !== undefined) {
-    line = v.hostSeat === v.viewerSeat
-      ? `round ${v.roundNumber} complete`
-      : `waiting for ${firstName(v, v.hostSeat)} to start round ${v.roundNumber + 1}…`;
+    main = "⏸ Paused";
+  } else if (v.phase === "ROUND_END" && v.roundNumber < v.N && v.hostSeat != null) {
+    main = v.hostSeat === me ? `Round ${v.roundNumber} complete` : `Waiting for ${firstName(v, v.hostSeat)}…`;
   }
-  if (!line) return null;
+  if (!main) return null;
   return (
-    <div style={{
-      position: "absolute", left: "50%", top: "38%", transform: "translate(-50%,-50%)", zIndex: 2,
-      color: "rgba(255,253,247,.85)", fontSize: 17, fontWeight: 700, letterSpacing: 0.3,
-      textShadow: "0 2px 6px rgba(0,0,0,.45)", pointerEvents: "none", whiteSpace: "nowrap",
-    }}>
-      {line}
+    <div style={{ position: "absolute", left: "50%", top: "33%", transform: "translate(-50%,-50%)", zIndex: 2, pointerEvents: "none", textAlign: "center", whiteSpace: "nowrap" }}>
+      <div style={{ display: "inline-block", background: "rgba(35,20,45,.34)", color: mine ? "#ffe6a6" : "rgba(255,253,247,.96)", fontSize: 15.5, fontWeight: 700, letterSpacing: 0.3, padding: "3px 13px", borderRadius: 14, textShadow: "0 1px 3px rgba(0,0,0,.4)" }}>
+        {main}
+      </div>
+      {sub && <div style={{ marginTop: 4, fontSize: 12.5, color: "rgba(255,253,247,.8)", textShadow: "0 1px 3px rgba(0,0,0,.4)" }}>{sub}</div>}
     </div>
   );
 }
@@ -1012,7 +1014,7 @@ function Hand({ view: v }: { view: ExtendedView }) {
   // -1 = no keyboard focus: the first card must NOT look pre-selected on touch devices
   // (mobile review: the leftmost card appeared auto-chosen). Arrow keys summon focus.
   const [focus, setFocus] = useState(-1);
-  const [sortBy, setSortBy] = useState<"suit" | "rank">("suit");
+  const sortBy: "suit" | "rank" = "suit"; // fixed suit sort — the toggle button was removed
   const RANK_ORDER = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
   const SUIT_DISPLAY: Suit[] = ["S", "H", "C", "D"];
   const hand = useMemo(() => {
@@ -1048,14 +1050,8 @@ function Hand({ view: v }: { view: ExtendedView }) {
   const overflows = !wide && fanWidth > vw - 16;
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
-      {n > 0 && ( // own row, never over a card (playtest #1: it hid the first card on mobile)
-        <div style={{ alignSelf: "flex-end", paddingRight: 6, display: "flex", gap: 6, alignItems: "center" }}>
-          {overflows && <span style={{ fontSize: 10, color: "var(--ink-soft)" }}>⟷ swipe the fan</span>}
-          <button onClick={() => { setSortBy((x) => (x === "suit" ? "rank" : "suit")); sfx.lift(); }}
-            style={{ ...btnSec, padding: "2px 8px", fontSize: 10.5, opacity: 0.75 }}>
-            sort: {sortBy}
-          </button>
-        </div>
+      {overflows && (
+        <div style={{ alignSelf: "flex-end", paddingRight: 6, fontSize: 10, color: "var(--ink-soft)" }}>⟷ swipe the fan</div>
       )}
     <div style={{
       position: "relative", display: "flex", justifyContent: overflows ? "flex-start" : "center", alignItems: "flex-end",
@@ -1588,7 +1584,7 @@ function PartnerStatus({ view: v }: { view: ExtendedView }) {
     const made = v.lastRoundSuccess;
     return (
       <div style={{
-        textAlign: "center", padding: "5px 10px", margin: "2px 0 4px", borderRadius: 8, fontSize: wide ? 13.5 : 12.5,
+        textAlign: "center", padding: "5px 10px", margin: "2px 0 10px", borderRadius: 8, fontSize: wide ? 13.5 : 12.5,
         fontWeight: 800, background: made ? "var(--gold)" : "var(--ink)", color: made ? "#fff" : "var(--parchment)",
         position: "relative", zIndex: 6,
       }}>
@@ -1636,7 +1632,7 @@ function PartnerStatus({ view: v }: { view: ExtendedView }) {
   }
   return (
     <div style={{
-      textAlign: "center", padding: "5px 10px", margin: "2px 0 4px", borderRadius: 8, fontSize: wide ? 13.5 : 12.5,
+      textAlign: "center", padding: "5px 10px", margin: "2px 0 10px", borderRadius: 8, fontSize: wide ? 13.5 : 12.5,
       background: strong ? "var(--gold)" : "rgba(255,253,247,.9)", color: strong ? "#fff" : "var(--ink)",
       border: "1px solid rgba(59,34,71,.12)", position: "relative", zIndex: 6, // above the top seat plate — never half-hidden
       whiteSpace: wide ? "normal" : "nowrap", overflow: "hidden", textOverflow: "ellipsis",
