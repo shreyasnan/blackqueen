@@ -661,6 +661,9 @@ function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: 
   const me = v.viewerSeat;
   const muteHold = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearHold = () => { if (muteHold.current) { clearTimeout(muteHold.current); muteHold.current = null; } };
+  const preselect = useStore((s) => s.preselect);
+  const setPreselect = useStore((s) => s.setPreselect);
+  const showQueued = seat === me && preselect && v.phase === "TRICK_PLAY" && v.turnSeat !== me;
   const isTurn = v.turnSeat === seat && (v.phase === "TRICK_PLAY" || v.phase === "BIDDING");
   const isSetup = v.phase === "DECLARER_SETUP" && v.declarerSeat === seat;
   const active = isTurn || isSetup;
@@ -734,6 +737,15 @@ function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: 
       {muted && (
         <span title="reactions muted — long-press to unmute" aria-label="reactions muted"
           style={{ position: "absolute", top: -6, left: -6, zIndex: 12, background: "var(--ink)", color: "#fff", borderRadius: 9, width: 18, height: 18, fontSize: 10, display: "grid", placeItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,.4)" }}>🔇</span>
+      )}
+      {showQueued && preselect && (
+        <div onClick={() => setPreselect(null)} title="queued to auto-play — tap to undo"
+          style={{ position: "absolute", bottom: "104%", left: "50%", transform: "translateX(-50%)", zIndex: 13, display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: 8.5, fontWeight: 900, color: "var(--teal)", letterSpacing: 0.5, marginBottom: 2 }}>⏳ QUEUED</div>
+          <div style={{ borderRadius: 7, boxShadow: "0 0 0 2px var(--teal), 0 3px 8px rgba(0,0,0,.3)" }}>
+            <CardFace card={preselect} width={30} />
+          </div>
+        </div>
       )}
       {/* the unmissable JOIN flash: expanding gold rings + badge the moment this seat is revealed */}
       <AnimatePresence>
@@ -1099,6 +1111,27 @@ function Hand({ view: v }: { view: ExtendedView }) {
     () => (myTurn ? new Set(legalPlays(v.ownHand as Card[], ledSuit as Suit | null).map((c) => `${c.rank}${c.suit}`)) : new Set<string>()),
     [myTurn, v.ownHand, ledSuit],
   );
+  // ---- PRE-SELECT: queue a card while awaiting your turn; it auto-plays the instant your turn lands ----
+  const preselect = useStore((s) => s.preselect);
+  const setPreselect = useStore((s) => s.setPreselect);
+  const pushToast = useStore((s) => s.pushToast);
+  const sameCard = (a: Card | null | undefined, b: Card) => !!a && a.rank === b.rank && a.suit === b.suit;
+  const preselectMode = v.phase === "TRICK_PLAY" && !myTurn && v.ownHand.length > 0;
+  const commit = (card: Card) => {
+    if (myTurn) { sendAction("PLAY_CARD", { card }); sfx.thock(); haptic(10); }
+    else if (preselectMode) { setPreselect(sameCard(preselect, card) ? null : card); sfx.lift(); haptic(8); }
+  };
+  // when your turn arrives, play the queued card if it's (still) legal — else drop it and hand you control
+  useEffect(() => {
+    if (!myTurn || !preselect) return;
+    if (legal.has(`${preselect.rank}${preselect.suit}`)) { sendAction("PLAY_CARD", { card: preselect }); sfx.thock(); haptic(12); }
+    else pushToast("Your queued card can't follow this trick — your turn.");
+    setPreselect(null);
+  }, [myTurn]); // eslint-disable-line react-hooks/exhaustive-deps
+  // drop the queue if that card is no longer in your hand (played, or a fresh deal)
+  useEffect(() => {
+    if (preselect && !v.ownHand.some((c) => sameCard(preselect, c))) setPreselect(null);
+  }, [v.ownHand]); // eslint-disable-line react-hooks/exhaustive-deps
   // -1 = no keyboard focus: the first card must NOT look pre-selected on touch devices
   // (mobile review: the leftmost card appeared auto-chosen). Arrow keys summon focus.
   const [focus, setFocus] = useState(-1);
@@ -1154,8 +1187,12 @@ function Hand({ view: v }: { view: ExtendedView }) {
         const copy = seen.get(base) ?? 0; // 2-deck: two identical cards need distinct React keys
         seen.set(base, copy + 1);
         return (
-          <div key={`${base}-${copy}`} style={{ marginLeft: i === 0 ? 0 : overlap, transform: `rotate(${rot}deg) translateY(${lift}px)`, zIndex: i, flexShrink: 0 }}>
-            <DraggableCard card={c} width={cardW} playable={myTurn && legal.has(`${c.rank}${c.suit}`)}
+          <div key={`${base}-${copy}`} style={{ marginLeft: i === 0 ? 0 : overlap, transform: `rotate(${rot}deg) translateY(${lift}px)`, zIndex: sameCard(preselect, c) ? 56 : i, flexShrink: 0 }}>
+            <DraggableCard card={c} width={cardW}
+              interactive={(myTurn && legal.has(`${c.rank}${c.suit}`)) || preselectMode}
+              variant={myTurn ? "play" : "preselect"}
+              preselected={sameCard(preselect, c)}
+              onCommit={commit}
               dimmed={myTurn && !legal.has(`${c.rank}${c.suit}`)} focused={myTurn && focus >= 0 && i === focus} />
           </div>
         );
@@ -1165,46 +1202,55 @@ function Hand({ view: v }: { view: ExtendedView }) {
   );
 }
 
-function DraggableCard({ card, playable, dimmed, focused, width }: { card: Card; playable: boolean; dimmed: boolean; focused: boolean; width?: number }) {
-  const [scope, animate] = useAnimate();
+function DraggableCard({ card, interactive, variant, preselected, dimmed, focused, width, onCommit }: {
+  card: Card; interactive: boolean; variant: "play" | "preselect"; preselected?: boolean;
+  dimmed: boolean; focused: boolean; width?: number; onCommit: (card: Card) => void;
+}) {
+  const [scope] = useAnimate();
   const [armed, setArmed] = useState(false);
-  const pushToast = useStore((s) => s.pushToast);
-  useEffect(() => { if (!playable) setArmed(false); }, [playable]);
+  const isPlay = variant === "play";
+  useEffect(() => { if (!interactive) setArmed(false); }, [interactive]);
+  const fire = () => { onCommit(card); setArmed(false); };
   return (
-    <motion.div ref={scope} drag={playable} dragSnapToOrigin dragElastic={playable ? 0.6 : 0.05}
+    <motion.div ref={scope} drag={interactive} dragSnapToOrigin dragElastic={0.6}
       whileDrag={{ scale: 1.15, rotate: 4, zIndex: 60 }}
-      onDragStart={() => playable && sfx.lift()}
+      onDragStart={() => interactive && sfx.lift()}
       onDragEnd={(_, info) => {
-        if (playable && info.offset.y < -90) { sendAction("PLAY_CARD", { card }); sfx.thock(); haptic(10); }
-        else if (playable) sfx.ret();
-        else if (info.offset.y < -40) { animate(scope.current, { x: [0, -7, 7, -4, 0] }, { duration: 0.35 }); sfx.illegal(); pushToast(`Must follow ${GLYPH[useStore.getState().view?.currentTrick[0]?.card.suit ?? "S"]}`); }
+        if (!interactive) return;
+        if (info.offset.y < -90) fire();                    // swipe up: play / queue (or un-queue via toggle)
+        else if (preselected && info.offset.y > 60) fire(); // swipe down on a queued card: un-queue
+        else sfx.ret();
       }}
       onClick={() => {
-        if (!playable) return;
-        if (armed) { sendAction("PLAY_CARD", { card }); sfx.thock(); haptic(10); }
-        else { setArmed(true); sfx.lift(); setTimeout(() => setArmed(false), 4000); } // U2: 4s to confirm (was 2.2)
+        if (!interactive) return;
+        if (armed) fire();
+        else { setArmed(true); sfx.lift(); setTimeout(() => setArmed(false), 4000); } // 4s to confirm
       }}
-      role="button" aria-label={`${playable ? "Play" : ""} ${card.rank} of ${SUIT_WORD[card.suit]}${dimmed ? " (not legal now)" : ""}`}
+      role="button"
+      aria-label={`${isPlay ? "Play" : "Queue"} ${card.rank} of ${SUIT_WORD[card.suit]}${dimmed ? " (not legal now)" : ""}${preselected ? " (queued — tap to undo)" : ""}`}
       aria-disabled={dimmed || undefined}
-      animate={{ y: armed ? -24 : focused ? -14 : playable ? -8 : 0, scale: armed ? 1.08 : 1, zIndex: armed ? 55 : undefined }}
+      animate={{ y: preselected ? -20 : armed ? -24 : focused ? -14 : (interactive && isPlay) ? -8 : 0, scale: armed ? 1.08 : preselected ? 1.04 : 1, zIndex: (armed || preselected) ? 55 : undefined }}
       style={{
-        position: "relative", cursor: playable ? "grab" : "default", touchAction: "none",
-        // it's your turn: playable cards RISE and glow; unplayable ones recede but STAY READABLE —
-        // (mobile review #1: 0.55 + grayscale made red ranks vanish on the cream table)
+        position: "relative", cursor: interactive ? "pointer" : "default", touchAction: "none",
         opacity: dimmed ? 0.78 : 1,
-        filter: dimmed ? "saturate(0.75) brightness(0.96)" : playable ? "drop-shadow(0 4px 10px rgba(201,153,46,.45))" : "none",
+        filter: dimmed ? "saturate(0.75) brightness(0.96)"
+          : preselected ? "drop-shadow(0 5px 12px rgba(46,143,131,.7))"
+          : (interactive && isPlay) ? "drop-shadow(0 4px 10px rgba(201,153,46,.45))" : "none",
       }}>
-      {armed && ( // unmistakable confirmation of WHICH card is armed (misplay protection)
+      {preselected && (
+        <div style={{ position: "absolute", top: -3, right: -3, zIndex: 57, background: "var(--teal)", color: "#fff", borderRadius: 9, width: 18, height: 18, fontSize: 11, display: "grid", placeItems: "center", boxShadow: "0 1px 4px rgba(0,0,0,.35)" }}>⏳</div>
+      )}
+      {armed && !preselected && (
         <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-          style={{ position: "absolute", top: -28, left: "50%", transform: "translateX(-50%)", background: "var(--gold)", color: "#fff", borderRadius: 8, padding: "3px 9px", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap", zIndex: 56, boxShadow: "0 3px 8px rgba(0,0,0,.35)" }}>
-          tap again to play {ck(card)} ▲
+          style={{ position: "absolute", top: -28, left: "50%", transform: "translateX(-50%)", background: isPlay ? "var(--gold)" : "var(--teal)", color: "#fff", borderRadius: 8, padding: "3px 9px", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap", zIndex: 56, boxShadow: "0 3px 8px rgba(0,0,0,.35)" }}>
+          tap again to {isPlay ? "play" : "queue"} {ck(card)} ▲
         </motion.div>
       )}
-      {armed && ( // U2: the card rose 24px away from the finger — keep the ORIGINAL touch spot hot
-        <div onClick={(e) => { e.stopPropagation(); sendAction("PLAY_CARD", { card }); sfx.thock(); haptic(10); }}
+      {armed && ( // keep the original touch spot hot after the card rises
+        <div onClick={(e) => { e.stopPropagation(); fire(); }}
           style={{ position: "absolute", left: -6, right: -6, bottom: -30, height: 34, zIndex: 54 }} />
       )}
-      <CardFace card={card} highlight={armed || focused} single width={width} />
+      <CardFace card={card} highlight={armed || focused || !!preselected} single width={width} />
     </motion.div>
   );
 }

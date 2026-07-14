@@ -1,6 +1,7 @@
 // State layer (UI_SPEC §14): server truth only. The view IS the game; events feed the theater/log.
 import { create } from "zustand";
 import type { ClientView } from "@engine/view";
+import type { Card } from "@engine/cards";
 
 export type ExtendedView = ClientView & {
   seatNames?: string[]; seatAvatars?: string[]; hostSeat?: number | null;
@@ -29,6 +30,8 @@ interface AppState {
   connection: "idle" | "connecting" | "connected" | "reconnecting";
   stagedTrump: string | null; // local echo (§9.2) — never from the wire
   stagedConfirmed: boolean;
+  preselect: Card | null; // a card queued to auto-play the moment it's your turn (client-only)
+  setPreselect(c: Card | null): void;
   lastTrickOpen: boolean;
   setLastTrickOpen(open: boolean): void;
   roomInfo: { roomId: string; code: string | null; members: { accountId: string; displayName: string; avatar?: string }[]; host: string } | null;
@@ -65,6 +68,8 @@ export const useStore = create<AppState>((set) => ({
   connection: "idle",
   stagedTrump: null,
   stagedConfirmed: false,
+  preselect: null,
+  setPreselect: (preselect) => set({ preselect }),
   lastTrickOpen: false,
   setLastTrickOpen: (lastTrickOpen) => set({ lastTrickOpen }),
   roomInfo: null,
@@ -75,6 +80,8 @@ export const useStore = create<AppState>((set) => ({
       // clear the staged echo once the contract is public
       stagedTrump: view.phase === "DECLARER_SETUP" ? s.stagedTrump : null,
       stagedConfirmed: view.phase === "DECLARER_SETUP" ? s.stagedConfirmed : false,
+      // a queued card only makes sense during trick play
+      preselect: view.phase === "TRICK_PLAY" ? s.preselect : null,
     })),
   pushEvent: (e) => set((s) => ({ events: [...s.events.slice(-199), e] })),
   pushToast: (text) => {
@@ -89,6 +96,6 @@ export const useStore = create<AppState>((set) => ({
   setRoomInfo: (roomInfo) => set({ roomInfo }),
   resetToHome: () => set({
     screen: "home", view: null, stateVersion: 0, events: [], roomInfo: null,
-    connection: "idle", stagedTrump: null, stagedConfirmed: false, lastTrickOpen: false, flights: [],
+    connection: "idle", stagedTrump: null, stagedConfirmed: false, preselect: null, lastTrickOpen: false, flights: [],
   }),
 }));
