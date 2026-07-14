@@ -352,12 +352,12 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
             </div>
 
             <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, color: "var(--ink-soft)", margin: "2px 0 4px" }}>
-              SELECT {C} CARD{C > 1 ? "S" : ""} TO CALL {C > 1 ? "AS PARTNERS" : "AS PARTNER"}
+              SELECT {C > 1 ? `${C} PARTNER CARDS` : "YOUR PARTNER CARD"}
             </div>
             <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 8 }}>
               {twoDeck
                 ? <>two copies of every card exist — <b>whoever plays the first copy joins your team</b> (maybe even you)</>
-                : <>whoever holds {C > 1 ? "them" : "it"} secretly joins your team — call a card you hold to go solo</>}
+                : <>whoever holds {C > 1 ? "them" : "it"} secretly joins your team — pick a card you hold to go solo</>}
             </div>
 
             {SUITS.map((s) => {
@@ -414,13 +414,13 @@ function DeclarerSetupModal({ view: v }: { view: ExtendedView }) {
             {/* #5: double/triple-partner risk when you call a card you already hold a copy of */}
             <div style={{ minHeight: 34, fontSize: 11.5, fontWeight: 700, color: "var(--coral)", lineHeight: 1.3, padding: "0 4px" }}>
               {heldCount > 0 && (twoDeck
-                ? <>⚠ {shares === 3 ? "TRIPLE PARTNER" : "DOUBLE PARTNER"} — you hold a copy of {heldCount === 1 ? "one called card" : "both called cards"}. Play {heldCount === 1 ? "it" : "them"} first and you carry {shares} shares: win big (+{shares}×{v.Y}) or lose big (−{shares}×{v.Y}).</>
-                : <>calling your own card — SOLO play: you keep all {shares} share{shares > 1 ? "s" : ""} and gift nobody a partner slot.</>)}
+                ? <>⚠ {shares === 3 ? "TRIPLE PARTNER" : "DOUBLE PARTNER"} — you hold a copy of {heldCount === 1 ? "one partner card" : "both partner cards"}. Play {heldCount === 1 ? "it" : "them"} first and you carry {shares} shares: win big (+{shares}×{v.Y}) or lose big (−{shares}×{v.Y}).</>
+                : <>picking your own card — SOLO play: you keep all {shares} share{shares > 1 ? "s" : ""} and gift nobody a partner slot.</>)}
             </div>
 
             <button disabled={picked.length !== C} onClick={() => { sendAction("CALL_CARDS", { cards: picked }); pickCache.delete(v.roundNumber); sfx.thock(); }}
               style={{ ...btn, padding: "11px 26px", fontSize: 15, opacity: picked.length === C ? 1 : 0.4, marginTop: 2 }}>
-              {picked.length === C ? `Call ${picked.map(ck).join(" + ")} ▸` : `pick ${C - picked.length} more`}
+              {picked.length === C ? `Select ${picked.map(ck).join(" + ")} ▸` : `pick ${C - picked.length} more`}
             </button>
           </>
         )}
@@ -688,9 +688,9 @@ function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: 
     if (team && !was && seat !== v.declarerSeat) { setFlash(true); const t = setTimeout(() => setFlash(false), 1600); return () => clearTimeout(t); }
   }, [team]);
   const relation =
-    seat === me ? (team && seat !== v.declarerSeat ? "partner (you)" : seat === v.declarerSeat ? "declarer (you)" : side === "def" ? "defender (you)" : null) :
+    seat === me ? (team && seat !== v.declarerSeat ? "partner (you)" : seat === v.declarerSeat ? "bidder (you)" : side === "def" ? "defender (you)" : null) :
     team && seat !== v.declarerSeat ? (iAmTeam ? "your partner" : "partner") :
-    seat === v.declarerSeat ? (iAmTeam && me !== v.declarerSeat ? "your declarer" : "declarer") :
+    seat === v.declarerSeat ? (iAmTeam && me !== v.declarerSeat ? "your bidder" : "bidder") :
     side === "def" ? "defender" : null;
   // Never show your OWN seat as away — if you're looking at the screen you're clearly here (the server's
   // socket flag can lag on mobile after backgrounding). Only other seats show 💤 on disconnect.
@@ -811,7 +811,7 @@ function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: 
               background: "var(--coral)", color: "#fff", fontSize: 11, fontWeight: 900, lineHeight: "18px",
               boxShadow: "0 2px 5px rgba(0,0,0,.35), inset 0 -1.5px 0 rgba(0,0,0,.25)", textAlign: "center",
             }}>
-            D
+            B
           </motion.span>
         )}
       </div>
@@ -915,9 +915,9 @@ function FeltStatus({ view: v }: { view: ExtendedView }) {
       sub = `high bid ${v.currentHighBid} · ${v.currentHighBidderSeat === me ? "you" : firstName(v, v.currentHighBidderSeat)}`;
     }
   } else if (v.phase === "DECLARER_SETUP") {
-    main = v.declarerSeat != null && v.declarerSeat !== me ? `${firstName(v, v.declarerSeat)} is choosing trump & a card…` : null;
-  } else if (v.phase === "TRICK_PLAY") {
-    main = mine ? "Your turn" : v.turnSeat != null ? `${firstName(v, v.turnSeat)}'s turn` : null;
+    main = v.declarerSeat != null && v.declarerSeat !== me ? `${firstName(v, v.declarerSeat)} is picking trump & a partner…` : null;
+  // #6: during trick play the center gets covered by cards — whose turn it is lives on the seat plate
+  // (the bobbing pointer + YOUR TURN badge + glow), so no center label here.
   } else if (v.phase === "PAUSED") {
     main = "⏸ Paused";
   } else if (v.phase === "ROUND_END" && v.roundNumber < v.N && v.hostSeat != null) {
@@ -1322,7 +1322,7 @@ function ActivitySidebar({ view: v, isHost }: { view: ExtendedView; isHost: bool
         const mine = v.turnSeat === me;
         return {
           title: mine ? "Your bid" : <><Face id={faceOf(v, v.turnSeat!)} size={18} /> {firstName(v, v.turnSeat!)} is bidding</>,
-          detail: <>High bid <b>{v.currentHighBid}</b> ({v.currentHighBidderSeat === me ? "you" : firstName(v, v.currentHighBidderSeat!)}). The winner becomes declarer and picks trump.</>,
+          detail: <>High bid <b>{v.currentHighBid}</b> ({v.currentHighBidderSeat === me ? "you" : firstName(v, v.currentHighBidderSeat!)}). The winner becomes the bidder and picks trump.</>,
         };
       }
       case "DECLARER_SETUP": {
@@ -1331,9 +1331,9 @@ function ActivitySidebar({ view: v, isHost }: { view: ExtendedView; isHost: bool
           title: mine ? "Set up your bid" : <><Face id={faceOf(v, v.declarerSeat!)} size={18} /> {firstName(v, v.declarerSeat!)} is scheming</>,
           detail: mine
             ? (v.deckCount ?? 1) === 2
-              ? <>Pick trump, then call {v.calledCount ?? 2} card{(v.calledCount ?? 2) > 1 ? "s" : ""} — <b>whoever plays the first copy</b> joins your team.</>
-              : <>Pick trump, then call a card — whoever holds it becomes your secret partner.</>
-            : <>They're choosing trump and calling partner card{(v.calledCount ?? 1) > 1 ? "s" : ""}. Both revealed together.</>,
+              ? <>Pick trump, then select {v.calledCount ?? 2} partner card{(v.calledCount ?? 2) > 1 ? "s" : ""} — <b>whoever plays the first copy</b> joins your team.</>
+              : <>Pick trump, then select a partner card — whoever holds it becomes your secret partner.</>
+            : <>They're choosing trump and a partner card{(v.calledCount ?? 1) > 1 ? "s" : ""}. Both revealed together.</>,
         };
       }
       case "TRICK_PLAY": {
@@ -1356,7 +1356,7 @@ function ActivitySidebar({ view: v, isHost }: { view: ExtendedView; isHost: bool
           detail: isHost ? <>Start round {v.roundNumber + 1} when the table's done arguing.</> : <>They'll start round {v.roundNumber + 1}. Auto-starts if they doze.</>,
         };
       case "PAUSED":
-        return { title: "⏸ Paused", detail: <>Waiting on the declarer. {isHost ? "You can resume or end the game." : "The host can resume or end."}</> };
+        return { title: "⏸ Paused", detail: <>Waiting on the bidder. {isHost ? "You can resume or end the game." : "The host can resume or end."}</> };
       default:
         return { title: v.phase, detail: null };
     }
@@ -1537,16 +1537,16 @@ function OverlayContent({ overlay, view: v, onDismiss }: { overlay: NonNullable<
           <div style={{ fontSize: 28, margin: "4px 0", color: red(overlay.trump) ? "var(--coral)" : "var(--ink)" }}>
             <b>{SUIT_WORD[overlay.trump]}</b> {GLYPH[overlay.trump]} <span style={{ fontSize: 16, color: "var(--ink-soft)" }}>is trump</span>
           </div>
-          <div style={{ fontSize: 18 }}>calling {overlay.cards.map((c, i) => <b key={i} style={{ color: red(c.suit) ? "var(--coral)" : "var(--ink)", margin: "0 4px" }}>{ck(c)}</b>)}</div>
+          <div style={{ fontSize: 18 }}>{overlay.cards.length > 1 ? "partner cards: " : "partner card: "}{overlay.cards.map((c, i) => <b key={i} style={{ color: red(c.suit) ? "var(--coral)" : "var(--ink)", margin: "0 4px" }}>{ck(c)}</b>)}</div>
           <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 6 }}>someone at this table just became a secret partner…</div>
         </div>
       );
     case "reveal": {
       const headline =
         overlay.tier === "solo" ? <>…{name(overlay.seat)} is <b>ALONE</b>.</> :
-        overlay.tier === "queen" ? <><b>The Queen herself!</b> {av(overlay.seat)} {name(overlay.seat)} is with the declarer!</> :
-        overlay.tier === "final" ? <>{av(overlay.seat)} <b>{name(overlay.seat)}</b> is with the declarer — <b>the teams are set.</b></> :
-        <>★ {av(overlay.seat)} <b>{name(overlay.seat)}</b> is with the declarer!</>;
+        overlay.tier === "queen" ? <><b>The Queen herself!</b> {av(overlay.seat)} {name(overlay.seat)} is with the bidder!</> :
+        overlay.tier === "final" ? <>{av(overlay.seat)} <b>{name(overlay.seat)}</b> is with the bidder — <b>the teams are set.</b></> :
+        <>★ {av(overlay.seat)} <b>{name(overlay.seat)}</b> is with the bidder!</>;
       return (
         <div>
           <motion.div initial={{ rotate: -8, scale: 1.4 }} animate={{ rotate: 0, scale: 1 }} style={{ display: "inline-block" }}>
@@ -1568,7 +1568,7 @@ function OverlayContent({ overlay, view: v, onDismiss }: { overlay: NonNullable<
             </motion.div>
           )}
           <div style={{ fontSize: 30, fontWeight: 800, color: overlay.success ? "var(--teal)" : "var(--coral)" }}>
-            {overlay.success ? "CONTRACT MADE" : overlay.solo ? "DOWN ALONE" : "CONTRACT FAILED"}
+            {overlay.success ? "BID MADE" : overlay.solo ? "DOWN ALONE" : "BID FAILED"}
           </div>
           <div style={{ color: "var(--ink-soft)", lineHeight: 1.4 }}>
             {(() => {
@@ -1576,23 +1576,23 @@ function OverlayContent({ overlay, view: v, onDismiss }: { overlay: NonNullable<
               const teamNames = team.map((x) => name(x.s)).join(" & ");
               if (overlay.solo) return <>the Queen shakes her head slowly… <b>{teamNames}</b> went down alone at <b>{overlay.pts}</b>{need}</>;
               return overlay.success
-                ? <><b>{teamNames}</b> captured <b>{overlay.pts}</b> points{need} — contract held ✓</>
-                : <><b>{teamNames}</b> fell short at <b>{overlay.pts}</b>{need}. The defenders held the line.</>;
+                ? <><b>{teamNames}</b> made it — <b>{overlay.pts}</b> points{need} ✓</>
+                : <><b>{teamNames}</b> fell short at <b>{overlay.pts}</b>{need}.</>;
             })()}
           </div>
           {v.lastRoundEarlyEnd && (
             <div style={{ marginTop: 5, fontSize: 12, fontWeight: 700, color: "var(--ink-soft)" }}>
-              ⚡ Called early — the outcome was already decided, so the last tricks were skipped.
+              ⚡ Ended early — the outcome was already decided.
             </div>
           )}
+          {/* declutter: only the scoring seats — every defender is ±0, so we don't list them */}
           <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 3, alignItems: "center" }}>
-            {overlay.delta.map((d, s) => (
-              <span key={s} style={{ fontWeight: d !== 0 ? 800 : 400, fontSize: d !== 0 ? 16 : 13, color: d > 0 ? "var(--teal)" : d < 0 ? "var(--coral)" : "var(--ink-soft)" }}>
-                <Face id={faceOf(v, s)} size={17} /> {name(s)}{s === v.viewerSeat ? " (you)" : ""}: {d > 0 ? "+" : ""}{d === 0 ? "±0 (defender)" : d}
+            {overlay.delta.map((d, s) => d === 0 ? null : (
+              <span key={s} style={{ fontWeight: 800, fontSize: 16, color: d > 0 ? "var(--teal)" : "var(--coral)" }}>
+                <Face id={faceOf(v, s)} size={17} /> {name(s)}{s === v.viewerSeat ? " (you)" : ""}: {d > 0 ? "+" : ""}{d}
               </span>
             ))}
           </div>
-          <RoundInsights view={v} />
           {isFinal && (
             <div style={{ marginTop: 10, fontSize: 14, fontWeight: 800, color: "var(--gold)" }}>
               🏁 That was the final round — the game is over.
@@ -1739,7 +1739,7 @@ function PartnerStatus({ view: v }: { view: ExtendedView }) {
     if (v.allPartnersRevealed) {
       strong = true;
       text = partners.length === 0
-        ? <>You claimed your own called card{v.calledCount! > 1 ? "s" : ""} — <b>you are SOLO</b>. Everyone is against you.</>
+        ? <>You picked your own partner card{v.calledCount! > 1 ? "s" : ""} — <b>you are SOLO</b>. Everyone is against you.</>
         : <>Your partner{partners.length > 1 ? "s" : ""}: <b>{names(partners)}</b> 🤝</>;
     } else if (twoDeck) {
       // mobile review #3: the full sentence wrapped under the top seat plate — keep phones to one line
@@ -1762,7 +1762,7 @@ function PartnerStatus({ view: v }: { view: ExtendedView }) {
     text = v.allPartnersRevealed
       ? <>Teams are known: <b>{names([v.declarerSeat, ...partners])}</b> vs. the rest. Hold them under <b>{v.Y}</b>.</>
       : twoDeck
-        ? wide ? <>The <b>first player to play</b> {calledStr} joins the declarer. Watch every card…</> : <><b>First to play</b> {calledStr} <b>joins {firstName(v, v.declarerSeat)}</b></>
+        ? wide ? <>The <b>first player to play</b> {calledStr} joins the bidder. Watch every card…</> : <><b>First to play</b> {calledStr} <b>joins {firstName(v, v.declarerSeat)}</b></>
         : <>Someone secretly holds {calledStr}. Watch closely…</>;
   }
   return (
