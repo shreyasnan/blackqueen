@@ -696,70 +696,54 @@ function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: 
   // socket flag can lag on mobile after backgrounding). Only other seats show 💤 on disconnect.
   const away = seat !== me && v.seatConnected?.[seat] === false;
   const wideChip = useWide();
-  const avSize = big ? 34 : 27; // compact plates: cards are the stars, squares stay supporting cast
+  // v3 seats: a circular avatar with a team-colored RING, and a small dark pill for the text —
+  // smaller and rounder, so more felt shows through (was a chunky rounded-square box).
+  const faceSize = big ? 42 : 34;
+  const ringD = faceSize + 10;
+  const ringColor = side === "def" ? "#2e8f83" : side === "team" ? "#c9992e" : active ? "#c9992e" : team ? SEAT_COLORS[seat % 7]! : "rgba(59,34,71,.32)";
+  const ringGlow = active
+    ? (side === "def"
+        ? ["0 0 10px rgba(46,143,131,.55)", "0 0 22px rgba(46,143,131,1)", "0 0 10px rgba(46,143,131,.55)"]
+        : ["0 0 10px rgba(201,153,46,.55)", "0 0 22px rgba(201,153,46,1)", "0 0 10px rgba(201,153,46,.55)"])
+    : side === "team" ? "0 0 10px rgba(201,153,46,.5)"
+    : side === "def" ? "0 0 7px rgba(46,143,131,.4)"
+    : "0 2px 6px rgba(0,0,0,.3)";
+  const nameTint = side === "def" ? "#bfeede" : side === "team" ? "#ffe6a6" : "#fdf7ea";
+  const roleColor = side === "def" ? "#8fe0cd" : "#ffcf85";
 
   return (
     <motion.div ref={(el) => { if (el) seatEls.set(seat, el); }}
       onPointerDown={() => { if (seat === me || !onToggleMute) return; muteHold.current = setTimeout(() => { onToggleMute(seat); haptic(20); }, 500); }}
       onPointerUp={clearHold} onPointerLeave={clearHold} onPointerCancel={clearHold}
-      animate={{
-        scale: active ? 1.1 : 1, y: active ? -3 : 0,
-        opacity: anyoneActive && !active ? 0.87 : 1, // non-actors recede gently — dimmed, never "disabled"
-        // A DEFENDER NEVER TURNS GOLD (mobile review round 3): gold = declarer's side, teal = defense,
-        // even while acting. Activity is carried by the glow/scale/pointer, not by stealing team colors.
-        background: side === "def" ? (active ? "linear-gradient(170deg, #f2fbf8, #cfeae2)" : "linear-gradient(170deg, #eef6f4, #d8eae5)")
-          : side === "team" ? (active ? "linear-gradient(170deg, #fffdf7, #fbf0d4)" : "linear-gradient(170deg, #fdf6e3, #f6e5b8)")
-          : active ? "linear-gradient(170deg, #fffdf7, #fbf0d4)"
-          : "linear-gradient(170deg, #fffdf7, #fffdf7)",
-        borderColor: side === "def" ? "#2e8f83" : side === "team" ? "#c9992e" : active ? "#c9992e" : team ? SEAT_COLORS[seat % 7]! : "rgba(59,34,71,.14)",
-        boxShadow: active
-          ? side === "def"
-            ? ["0 0 14px rgba(46,143,131,.5), 0 2px 6px rgba(59,34,71,.25)", "0 0 30px rgba(46,143,131,.95), 0 2px 6px rgba(59,34,71,.25)", "0 0 14px rgba(46,143,131,.5), 0 2px 6px rgba(59,34,71,.25)"]
-            : ["0 0 14px rgba(201,153,46,.5), 0 2px 6px rgba(59,34,71,.25)", "0 0 30px rgba(201,153,46,.95), 0 2px 6px rgba(59,34,71,.25)", "0 0 14px rgba(201,153,46,.5), 0 2px 6px rgba(59,34,71,.25)"]
-          : side === "team" // declarer's side stays visibly lit even off-turn — you always know who's with whom
-            ? "0 0 12px rgba(201,153,46,.55), 0 2px 5px rgba(59,34,71,.25)"
-            : "0 2px 5px rgba(59,34,71,.25)",
-      }}
-      transition={{
-        ...SPRING,
-        boxShadow: active ? { repeat: Infinity, duration: 1.6, ease: "easeInOut" } : undefined,
-        // the cascade: each seat flips to its team color a beat after the last (a moment, not a repaint)
-        // team seats flip IMMEDIATELY on their own reveal; the defender cascade still waits for teamsKnown
-        background: side === "team" ? { duration: 0.35 } : teamsKnown ? { delay: 0.35 + seat * 0.16, duration: 0.6 } : { duration: 0.3 },
-        borderColor: side === "team" ? { duration: 0.35 } : teamsKnown ? { delay: 0.35 + seat * 0.16, duration: 0.6 } : { duration: 0.3 },
-      }}
-      style={{
-        position: "relative", textAlign: "center", minWidth: big ? 112 : wideChip ? 84 : 74,
-        maxWidth: wideChip ? undefined : "44vw", // phones: a side plate must never run off the screen
-        borderRadius: 12, padding: big ? "6px 10px 5px" : "4px 7px 4px",
-        borderWidth: 2.5, borderStyle: "solid",
-      }}>
+      animate={{ scale: active ? 1.08 : 1, y: active ? -2 : 0, opacity: anyoneActive && !active ? 0.86 : 1 }}
+      transition={SPRING}
+      style={{ position: "relative", display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 4, textAlign: "center", maxWidth: wideChip ? undefined : "42vw" }}>
       {muted && (
         <span title="reactions muted — long-press to unmute" aria-label="reactions muted"
-          style={{ position: "absolute", top: -6, left: -6, zIndex: 12, background: "var(--ink)", color: "#fff", borderRadius: 9, width: 18, height: 18, fontSize: 10, display: "grid", placeItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,.4)" }}>🔇</span>
+          style={{ position: "absolute", top: -4, left: -4, zIndex: 12, background: "var(--ink)", color: "#fff", borderRadius: 9, width: 18, height: 18, fontSize: 10, display: "grid", placeItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,.4)" }}>🔇</span>
       )}
       {showQueued && preselect && (
         <div onClick={() => setPreselect(null)} title="queued to auto-play — tap to undo"
-          style={{ position: "absolute", bottom: "104%", left: "50%", transform: "translateX(-50%)", zIndex: 13, display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", whiteSpace: "nowrap" }}>
+          style={{ position: "absolute", bottom: "108%", left: "50%", transform: "translateX(-50%)", zIndex: 13, display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", whiteSpace: "nowrap" }}>
           <div style={{ fontSize: 8.5, fontWeight: 900, color: "var(--teal)", letterSpacing: 0.5, marginBottom: 2 }}>⏳ QUEUED</div>
           <div style={{ borderRadius: 7, boxShadow: "0 0 0 2px var(--teal), 0 3px 8px rgba(0,0,0,.3)" }}>
             <CardFace card={preselect} width={30} />
           </div>
         </div>
       )}
-      {/* the unmissable JOIN flash: expanding gold rings + badge the moment this seat is revealed */}
+      {/* JOIN flash: expanding gold rings around the avatar the moment this seat is revealed */}
       <AnimatePresence>
         {flash && !REDUCED && (
           <>
             {[0, 0.25, 0.5].map((d) => (
               <motion.div key={d} initial={{ opacity: 0.9, scale: 1 }} animate={{ opacity: 0, scale: 2.1 }} exit={{ opacity: 0 }}
                 transition={{ duration: 1.1, delay: d, ease: "easeOut" }}
-                style={{ position: "absolute", inset: -4, borderRadius: 14, border: "3px solid var(--gold)", pointerEvents: "none", zIndex: 11 }} />
+                style={{ position: "absolute", top: 0, left: "50%", marginLeft: -(ringD + 6) / 2, width: ringD + 6, height: ringD + 6, borderRadius: "50%", border: "3px solid var(--gold)", pointerEvents: "none", zIndex: 11 }} />
             ))}
             <motion.div initial={{ scale: 0, rotate: -12 }} animate={{ scale: [0, 1.3, 1] }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.5 }}
               style={{
-                position: "absolute", top: -34, left: "50%", transform: "translateX(-50%)", zIndex: 12, whiteSpace: "nowrap",
-                background: "var(--gold)", color: "#fff", fontSize: 11.5, fontWeight: 900, letterSpacing: 0.8,
+                position: "absolute", top: -30, left: "50%", transform: "translateX(-50%)", zIndex: 12, whiteSpace: "nowrap",
+                background: "var(--gold)", color: "#fff", fontSize: 11, fontWeight: 900, letterSpacing: 0.6,
                 borderRadius: 9, padding: "3px 10px", boxShadow: "0 0 18px rgba(201,153,46,.9), 0 3px 8px rgba(0,0,0,.35)",
               }}>
               ⭐ JOINS THE TEAM
@@ -767,65 +751,61 @@ function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: 
           </>
         )}
       </AnimatePresence>
-      {/* the unmissable pointer: bobbing marker above whoever must act */}
+      {/* bobbing pointer above whoever must act */}
       <AnimatePresence>
         {active && !REDUCED && (
-          <motion.div initial={{ opacity: 0, y: -6 }} exit={{ opacity: 0 }}
-            animate={{ opacity: 1, y: [0, -7, 0] }}
+          <motion.div initial={{ opacity: 0, y: -6 }} exit={{ opacity: 0 }} animate={{ opacity: 1, y: [0, -6, 0] }}
             transition={{ y: { repeat: Infinity, duration: 0.9, ease: "easeInOut" } }}
-            style={{
-              position: "absolute", top: -22, left: "50%", marginLeft: -11, zIndex: 9, // hugs the plate (was floating detached on mobile)
-              width: 0, height: 0, borderLeft: "11px solid transparent", borderRight: "11px solid transparent",
-              borderTop: "14px solid var(--gold)", filter: "drop-shadow(0 2px 4px rgba(0,0,0,.35))",
-            }} />
+            style={{ position: "absolute", top: -20, left: "50%", marginLeft: -10, zIndex: 9, width: 0, height: 0, borderLeft: "10px solid transparent", borderRight: "10px solid transparent", borderTop: "13px solid var(--gold)", filter: "drop-shadow(0 2px 4px rgba(0,0,0,.35))" }} />
         )}
       </AnimatePresence>
       {active && seat === me && (
         <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING}
-          style={{
-            position: "absolute", top: -13, left: "50%", transform: "translateX(-50%)", zIndex: 10, whiteSpace: "nowrap",
-            background: "var(--coral)", color: "#fff", fontSize: wideChip ? 10.5 : 9, fontWeight: 900, letterSpacing: wideChip ? 1 : 0.6,
-            borderRadius: 8, padding: wideChip ? "2px 8px" : "1.5px 6px", boxShadow: "0 2px 6px rgba(0,0,0,.3)",
-          }}>
+          style={{ position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", zIndex: 10, whiteSpace: "nowrap", background: "var(--coral)", color: "#fff", fontSize: wideChip ? 10 : 9, fontWeight: 900, letterSpacing: wideChip ? 1 : 0.6, borderRadius: 8, padding: wideChip ? "2px 8px" : "1.5px 6px", boxShadow: "0 2px 6px rgba(0,0,0,.3)" }}>
           YOUR TURN
         </motion.div>
       )}
       <AnimatePresence>
         {bubbles.filter((b) => b.seat === seat).map((b) => (
           <motion.div key={b.id} initial={{ opacity: 0, y: 6, scale: 0.6 }} animate={{ opacity: 1, y: -8, scale: 1 }} exit={{ opacity: 0, y: -20 }}
-            style={{ position: "absolute", top: -28, left: "50%", transform: "translateX(-50%)", background: "var(--card)", border: "1.5px solid var(--gold)", borderRadius: 12, padding: "2px 9px", whiteSpace: "nowrap", fontSize: 14, zIndex: 8, boxShadow: "0 3px 8px var(--shadow)" }}>
+            style={{ position: "absolute", top: -26, left: "50%", transform: "translateX(-50%)", background: "var(--card)", border: "1.5px solid var(--gold)", borderRadius: 12, padding: "2px 9px", whiteSpace: "nowrap", fontSize: 14, zIndex: 8, boxShadow: "0 3px 8px var(--shadow)" }}>
             {b.text}
           </motion.div>
         ))}
       </AnimatePresence>
+
+      {/* circular avatar with the team ring */}
       <div style={{ position: "relative", display: "inline-block" }}>
-        <Face id={faceOf(v, seat)} size={avSize + 8} tint={SEAT_COLORS[seat % 7]} />
+        <motion.div animate={{ borderColor: ringColor, boxShadow: ringGlow }}
+          transition={{ boxShadow: active ? { repeat: Infinity, duration: 1.6, ease: "easeInOut" } : { duration: 0.3 },
+            borderColor: side === "team" ? { duration: 0.35 } : teamsKnown ? { delay: 0.35 + seat * 0.16, duration: 0.6 } : { duration: 0.3 } }}
+          style={{ width: ringD, height: ringD, borderRadius: "50%", border: "2.5px solid", borderColor: ringColor, background: "var(--parchment)", overflow: "hidden", display: "grid", placeItems: "center" }}>
+          <Face id={faceOf(v, seat)} size={faceSize} tint={SEAT_COLORS[seat % 7]} />
+        </motion.div>
         <TimerRing active={active} self={active && seat === me}
           budgetMs={away ? (v.awayBudgetMs ?? 12000)
             : v.phase === "DECLARER_SETUP" ? ((v as any).setupBudgetMs ?? (v.turnBudgetMs ?? 45000) + 45000)
-            : (v.turnBudgetMs ?? 45000)} size={avSize + 18} />
-        {seat === v.declarerSeat && ( // the "declarer button" — poker's dealer-chip language
+            : (v.turnBudgetMs ?? 45000)} size={ringD + 8} />
+        {seat === v.declarerSeat && (
           <motion.span initial={{ scale: 0, rotate: -120 }} animate={{ scale: 1, rotate: 0 }} transition={SPRING}
-            style={{
-              position: "absolute", right: -14, bottom: -2, width: 18, height: 18, borderRadius: 9,
-              background: "var(--coral)", color: "#fff", fontSize: 11, fontWeight: 900, lineHeight: "18px",
-              boxShadow: "0 2px 5px rgba(0,0,0,.35), inset 0 -1.5px 0 rgba(0,0,0,.25)", textAlign: "center",
-            }}>
+            style={{ position: "absolute", right: -3, bottom: -1, width: 18, height: 18, borderRadius: 9, background: "var(--coral)", color: "#fff", fontSize: 11, fontWeight: 900, lineHeight: "18px", boxShadow: "0 2px 5px rgba(0,0,0,.35), inset 0 -1.5px 0 rgba(0,0,0,.25)", textAlign: "center" }}>
             B
           </motion.span>
         )}
       </div>
-      <div style={{ fontWeight: 800, fontSize: big ? 13.5 : 12, color: SEAT_COLORS[seat % 7], whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: big ? 130 : 98 }}>
-        {seat === me ? "You" : firstName(v, seat)}
-      </div>
-      <div style={{ fontSize: 11, color: "var(--ink-soft)", whiteSpace: "nowrap" }}>
-        {away ? <b style={{ color: "var(--coral)" }}>💤 away</b> : <>{v.handCounts[seat]} card{v.handCounts[seat] === 1 ? "" : "s"}</>} · <b style={{ color: (v.perPlayerCapturedPoints[seat] ?? 0) > 0 ? "var(--ink)" : "var(--ink-soft)" }}>{v.perPlayerCapturedPoints[seat]} pts</b>
-      </div>
-      {relation && (
-        <div style={{ fontSize: 10.5, fontWeight: 800, color: side === "def" ? "#2e8f83" : "var(--coral)", letterSpacing: 0.3, textTransform: "uppercase" }}>
-          {relation}
+
+      {/* compact dark pill: name · count · role — readable over both felt and rail */}
+      <div style={{ background: "rgba(24,44,38,.62)", borderRadius: 10, padding: big ? "3px 11px" : "2px 8px", maxWidth: wideChip ? 150 : "40vw", boxShadow: "0 2px 6px rgba(0,0,0,.28)" }}>
+        <div style={{ fontWeight: 700, fontSize: big ? 13 : 12, color: nameTint, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 }}>
+          {seat === me ? "You" : firstName(v, seat)}
         </div>
-      )}
+        <div style={{ fontSize: 10, color: "rgba(255,253,247,.8)", whiteSpace: "nowrap", lineHeight: 1.25 }}>
+          {away ? <b style={{ color: "#ff9b8a" }}>💤 away</b> : <>{v.handCounts[seat]} · {v.perPlayerCapturedPoints[seat]}pts</>}
+        </div>
+        {relation && (
+          <div style={{ fontSize: 8.5, fontWeight: 800, color: roleColor, letterSpacing: 0.4, textTransform: "uppercase", lineHeight: 1.3 }}>{relation}</div>
+        )}
+      </div>
     </motion.div>
   );
 }
