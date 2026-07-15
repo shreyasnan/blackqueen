@@ -5,7 +5,7 @@ import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-41-auth-theme"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-42-ten-players"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -259,6 +259,17 @@ function Lobby({ auth }: { auth: AuthState }) {
     return () => clearInterval(t);
   }, [roomInfo?.roomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Above 6 players, default the table to 2 decks + 2 partners (fires once; host can still change it).
+  const auto2Deck = useRef(false);
+  useEffect(() => {
+    if (!roomInfo || roomInfo.host !== auth.accountId) return;
+    if (roomInfo.members.length > 6 && deckCount === 1 && !auto2Deck.current) {
+      auto2Deck.current = true;
+      setDeckCount(2); setCalledCount(2); setHandSize(12);
+      void pushConfig(2, 2, 12);
+    }
+  }, [roomInfo?.members.length, deckCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!roomInfo) return null;
   const isHost = roomInfo.host === auth.accountId;
   const members = roomInfo.members;
@@ -266,7 +277,7 @@ function Lobby({ auth }: { auth: AuthState }) {
   const effHand = (isHost ? handSize : ((roomInfo as any).handSize ?? "all")) as number | "all";
   const minPlayers = effDeck === 2 ? 6 : 4;
   const short = minPlayers - members.length;
-  const ghosts = Math.max(0, Math.min(7, minPlayers) - members.length);
+  const ghosts = Math.max(0, Math.min(10, minPlayers) - members.length);
   const leaveLobby = async () => {
     if (!window.confirm(isHost && members.length > 1 ? "Leave? Someone else becomes host." : "Leave this lobby?")) return;
     try { await api(`/api/rooms/${roomInfo.roomId}/leave`, {}); } catch { /* best effort */ }
@@ -359,7 +370,7 @@ function Lobby({ auth }: { auth: AuthState }) {
 
           <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 12, lineHeight: 1.5 }}>
             {deckCount === 2
-              ? <>Two of every card · needs 6–7 players · the first to play a called card joins your team.{calledCount === 3 && <span style={{ color: "var(--coral)" }}> Three partner cards means big swings.</span>}</>
+              ? <>Two of every card · needs 6–10 players · the first to play a called card joins your team.{calledCount === 3 && <span style={{ color: "var(--coral)" }}> Three partner cards means big swings.</span>}</>
               : handSize !== "all"
                 ? <>Extra cards are trimmed before the deal — lowest ranks first, never point cards — so the total stays 150.</>
                 : <>Every card is dealt — hand size depends on the player count.</>}
@@ -377,7 +388,7 @@ function Lobby({ auth }: { auth: AuthState }) {
       {isHost && (
         <>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <button style={{ ...ghostBtn, opacity: members.length >= 7 ? 0.5 : 1 }} disabled={members.length >= 7}
+            <button style={{ ...ghostBtn, opacity: members.length >= 10 ? 0.5 : 1 }} disabled={members.length >= 10}
               onClick={async () => { try { await api(`/api/rooms/${roomInfo.roomId}/addbot`, {}); } catch (e) { pushToast(String(e)); } }}>
               Add a bot
             </button>

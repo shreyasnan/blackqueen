@@ -14,8 +14,8 @@ import { Face } from "./faces";
 const GLYPH: Record<string, string> = { C: "♣", D: "♦", H: "♥", S: "♠" };
 const SUIT_WORD: Record<string, string> = { C: "Clubs", D: "Diamonds", H: "Hearts", S: "Spades" }; // U5: aria labels
 const SUITS: Suit[] = ["C", "D", "H", "S"];
-const AVATARS = ["🦊", "🦉", "🐱", "🦡", "🐰", "🦝", "🐸"];
-const SEAT_COLORS = ["#e0684b", "#2e8f83", "#c9992e", "#7b5ea7", "#4a7fb5", "#b5527f", "#6b8e3f"];
+const AVATARS = ["🦊", "🦉", "🐱", "🦡", "🐰", "🦝", "🐸", "🐻", "🐼", "🦁"];
+const SEAT_COLORS = ["#e0684b", "#2e8f83", "#c9992e", "#7b5ea7", "#4a7fb5", "#b5527f", "#6b8e3f", "#2f9fd0", "#9c6b3f", "#7d7d3f"];
 // Quick-chat set (broadcast-only, fixed — keeps the hidden-team game clean; no free text, no targeting).
 const EMOTES: Record<string, { face: string; label: string; bubble: string }> = {
   abbe:       { face: "😏", label: "Abbe!",       bubble: "😏 Abbe!" },
@@ -466,10 +466,10 @@ function LastTrickModal({ view: v }: { view: ExtendedView }) {
             const winner = p.seat === last.winnerSeat;
             return (
               <div key={i} style={{ textAlign: "center" }}>
-                <div style={{ borderRadius: 9, boxShadow: `0 0 0 2.5px ${SEAT_COLORS[p.seat % 7]}`, transform: winner ? "scale(1.1)" : "none" }}>
+                <div style={{ borderRadius: 9, boxShadow: `0 0 0 2.5px ${SEAT_COLORS[p.seat % SEAT_COLORS.length]}`, transform: winner ? "scale(1.1)" : "none" }}>
                   <CardFace card={p.card} small highlight={winner} />
                 </div>
-                <div style={{ fontSize: 11.5, marginTop: 4, fontWeight: 700, color: winner ? "var(--gold)" : SEAT_COLORS[p.seat % 7] }}>
+                <div style={{ fontSize: 11.5, marginTop: 4, fontWeight: 700, color: winner ? "var(--gold)" : SEAT_COLORS[p.seat % SEAT_COLORS.length] }}>
                   <Face id={faceOf(v, p.seat)} size={15} /> {p.seat === v.viewerSeat ? "you" : firstName(v, p.seat)}{winner ? " ✓" : ""}
                 </div>
               </div>
@@ -689,7 +689,7 @@ function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: 
   // smaller and rounder, so more felt shows through (was a chunky rounded-square box).
   const faceSize = big ? 42 : 34;
   const ringD = faceSize + 10;
-  const ringColor = side === "def" ? "#2e8f83" : side === "team" ? "#c9992e" : active ? "#c9992e" : team ? SEAT_COLORS[seat % 7]! : "rgba(59,34,71,.32)";
+  const ringColor = side === "def" ? "#2e8f83" : side === "team" ? "#c9992e" : active ? "#c9992e" : team ? SEAT_COLORS[seat % SEAT_COLORS.length]! : "rgba(59,34,71,.32)";
   const ringGlow = active
     ? (side === "def"
         ? ["0 0 10px rgba(46,143,131,.55)", "0 0 22px rgba(46,143,131,1)", "0 0 10px rgba(46,143,131,.55)"]
@@ -769,7 +769,7 @@ function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: 
           transition={{ boxShadow: active ? { repeat: Infinity, duration: 1.6, ease: "easeInOut" } : { duration: 0.3 },
             borderColor: side === "team" ? { duration: 0.35 } : teamsKnown ? { delay: 0.35 + seat * 0.16, duration: 0.6 } : { duration: 0.3 } }}
           style={{ width: ringD, height: ringD, borderRadius: "50%", border: "2.5px solid", borderColor: ringColor, background: "var(--parchment)", overflow: "hidden", display: "grid", placeItems: "center" }}>
-          <Face id={faceOf(v, seat)} size={faceSize} tint={SEAT_COLORS[seat % 7]} />
+          <Face id={faceOf(v, seat)} size={faceSize} tint={SEAT_COLORS[seat % SEAT_COLORS.length]} />
         </motion.div>
         <TimerRing active={active} self={active && seat === me}
           budgetMs={away ? (v.awayBudgetMs ?? 12000)
@@ -986,13 +986,13 @@ function TrickOnFelt({ view: v }: { view: ExtendedView }) {
               exit={{ opacity: 0, scale: 0.7 }}
               transition={SPRING_SOFT}
               style={{ position: "absolute", transform: "translate(-50%,-50%)", marginLeft: -26, marginTop: -37 }}>
-              <div style={{ borderRadius: 9, boxShadow: `0 0 0 2.5px ${SEAT_COLORS[p.seat % 7]}, 0 4px 10px rgba(0,0,0,.35)` }}>
+              <div style={{ borderRadius: 9, boxShadow: `0 0 0 2.5px ${SEAT_COLORS[p.seat % SEAT_COLORS.length]}, 0 4px 10px rgba(0,0,0,.35)` }}>
                 <CardFace card={p.card} small highlight={!!winner && !!linger} width={trickW} />
               </div>
               {/* attribution chip: border color alone asks players to memorize six seat colors */}
               <div style={{
                 textAlign: "center", fontSize: 9.5, fontWeight: 800, marginTop: 1, color: "#fff",
-                background: SEAT_COLORS[p.seat % 7], borderRadius: 6, padding: "0px 4px",
+                background: SEAT_COLORS[p.seat % SEAT_COLORS.length], borderRadius: 6, padding: "0px 4px",
                 maxWidth: trickW + 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 marginLeft: "auto", marginRight: "auto", width: "fit-content", opacity: 0.92,
               }}>
@@ -1353,7 +1353,7 @@ function ScoresMini({ view: v }: { view: ExtendedView }) {
       </div>
       {v.totalScore.map((t, s) => (
         <div key={s} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, padding: "1px 0" }}>
-          <span><Face id={faceOf(v, s)} size={16} tint={SEAT_COLORS[s % 7]} /> {s === v.viewerSeat ? "You" : firstName(v, s)}</span>
+          <span><Face id={faceOf(v, s)} size={16} tint={SEAT_COLORS[s % SEAT_COLORS.length]} /> {s === v.viewerSeat ? "You" : firstName(v, s)}</span>
           <span style={{ display: "flex", gap: 8 }}>
             <span style={{ color: "var(--ink-soft)" }}>{v.perPlayerCapturedPoints[s]}pts</span>
             <b style={{ color: t < 0 ? "var(--coral)" : "var(--ink)", minWidth: 32, textAlign: "right" }}>{t}</b>

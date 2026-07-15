@@ -64,7 +64,7 @@ export type CoreAction =
   | { type: "HOST_RESTART_ROUND"; payload: Record<string, never> }
   | { type: "HOST_RESOLVE_PAUSE"; payload: { action: "resume" | "end" } };
 
-const MAX_MEMBERS = 7;
+const MAX_MEMBERS = 10;
 const MIN_MEMBERS = 4;
 const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford, no I L O U (§3.3)
 
@@ -364,11 +364,11 @@ export class RoomCore {
   startGame(byAccountId: string, hostOrder?: string[]): { ok: boolean; error?: string } {
     if (this.phase !== "OPEN" || byAccountId !== this.hostAccountId) return { ok: false, error: "not host / not open" };
     const n = this.members.length;
-    if (n < MIN_MEMBERS || n > MAX_MEMBERS) return { ok: false, error: "need 4-7 players" };
+    if (n < MIN_MEMBERS || n > MAX_MEMBERS) return { ok: false, error: "need 4-10 players" };
     if (!Number.isInteger(this.config.N) || this.config.N < 1 || this.config.N > 10 * n) return { ok: false, error: "N out of bounds" };
     if (this.config.turnTimerMs + this.config.graceMs < 10000) return { ok: false, error: "timer too small" };
     if (this.config.deckCount !== 1 && this.config.deckCount !== 2) return { ok: false, error: "deckCount must be 1 or 2" };
-    if (this.config.deckCount === 2 && n < 6) return { ok: false, error: "2-deck games need 6-7 players" };
+    if (this.config.deckCount === 2 && n < 6) return { ok: false, error: "2-deck games need 6-10 players" };
     if (this.config.deckCount === 2 && this.config.calledCount !== undefined &&
         (!Number.isInteger(this.config.calledCount) || this.config.calledCount < 1 || this.config.calledCount > 3)) {
       return { ok: false, error: "calledCount must be 1-3" };

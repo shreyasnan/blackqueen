@@ -56,8 +56,8 @@ describe("lobby (PLAT-002 spirit)", () => {
     const r2 = new RoomCore("r2", new TestOut());
     r2.create(A, "Alice", {});
     expect(r2.join("BADBAD", B, "Bob").ok).toBe(false);
-    for (const [i, acct] of [B, C, D, "e", "f", "g"].entries()) expect(r2.join(r2.inviteCode, acct, `P${i}`).ok).toBe(true);
-    expect(r2.join(r2.inviteCode, "h", "H").ok).toBe(false); // 8th member
+    for (const [i, acct] of [B, C, D, "e", "f", "g", "i", "j", "k"].entries()) expect(r2.join(r2.inviteCode, acct, `P${i}`).ok).toBe(true);
+    expect(r2.join(r2.inviteCode, "l", "L").ok).toBe(false); // 11th member (cap is 10)
   });
   it("code regeneration invalidates old code instantly", () => {
     const r2 = new RoomCore("r2", new TestOut());

@@ -91,9 +91,9 @@ export type ApplyResult =
   | { ok: false; reject: "ILLEGAL" | "NOT_YOUR_TURN" | "WRONG_PHASE" };
 
 export function initGame(playerCount: number, N: number, round1DefaultDeclarerSeat: number, deckCount = 1, calledCountOverride?: number, handSizeOverride?: number, autoEndDecidedRounds = false): GameState {
-  if (playerCount < 4 || playerCount > 7) throw new Error("4–7 players only (§2)");
+  if (playerCount < 4 || playerCount > 10) throw new Error("4–10 players only (§2)");
   if (deckCount !== 1 && deckCount !== 2) throw new Error("deckCount must be 1 or 2 (§16)");
-  if (deckCount === 2 && playerCount < 6) throw new Error("2-deck games require 6–7 players (§3/§16)");
+  if (deckCount === 2 && playerCount < 6) throw new Error("2-deck games require 6–10 players (§3/§16)");
   if (!Number.isInteger(N) || N < 1 || N > 10 * playerCount) throw new Error("N out of bounds (§16)");
   const handSize = handSizeOverride ?? defaultHandSize(playerCount, deckCount);
   if (!Number.isInteger(handSize) || handSize < minHandSize(playerCount, deckCount) || handSize > maxHandSize(playerCount, deckCount)) {
