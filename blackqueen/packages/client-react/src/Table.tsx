@@ -1393,6 +1393,7 @@ function useTheater(view: ExtendedView | null, setOverlay: (o: Overlay) => void,
   const processed = useRef(0);
   const bubbleId = useRef(0);
   const wasMyTurn = useRef(false);
+  const lastTrump = useRef<Suit>("S"); // captured from TRUMP_CHOSEN so the contract modal shows the real trump
 
   useEffect(() => {
     if (!view) return;
@@ -1441,7 +1442,8 @@ function useTheater(view: ExtendedView | null, setOverlay: (o: Overlay) => void,
           setTimeout(() => { sfx.crown(); if (!self) hold({ type: "crown", seat: d.declarerSeat, Y: d.Y }, 2400); }, REDUCED ? 0 : 900);
           break;
         }
-        case "CARDS_CALLED": sfx.stamp(); haptic(20); hold({ type: "contract", trump: (useStore.getState().view as ExtendedView | null)?.trump ?? "S", cards: d.cards }, 3200); break;
+        case "TRUMP_CHOSEN": lastTrump.current = d.suit as Suit; break; // arrives right before CARDS_CALLED
+        case "CARDS_CALLED": sfx.stamp(); haptic(20); hold({ type: "contract", trump: lastTrump.current, cards: d.cards }, 3200); break;
         case "CARD_PLAYED":
           if (!d.auto) sfx.thock();
           else {
