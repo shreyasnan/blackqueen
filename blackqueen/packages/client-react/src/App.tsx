@@ -1,11 +1,11 @@
 // Corridor screens (UI_SPEC §3): Welcome/Sign-in → Home → Lobby → Table.
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "./store";
-import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect, AuthState } from "./net";
+import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect, storedRoom, AuthState } from "./net";
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-39-chat-tray"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-40-reconnect"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -25,17 +25,32 @@ export function App() {
     });
   }, [setScreen]);
 
-  // once authenticated with a pending invite: join automatically, using the saved identity
+  // once authenticated with a pending invite: join automatically, using the saved identity.
+  // If the game already started and this account is already a member, we reconnect straight to the table.
   useEffect(() => {
     if (!authed || !pendingJoin) return;
     const code = pendingJoin;
     setPendingJoin(null);
     history.replaceState(null, "", location.pathname); // the link is spent
     const p = loadProfile(authed);
-    api<{ roomId: string; members: any[]; host: string }>("/api/rooms/join", { code, displayName: p.nick, avatar: p.face })
-      .then((r) => { setRoomInfo({ roomId: r.roomId, code: null, members: r.members, host: r.host }); setScreen("lobby"); })
-      .catch(() => pushToast("That invite has expired — ask for a fresh link"));
+    api<{ roomId: string; members?: any[]; host?: string; reconnect?: boolean }>("/api/rooms/join", { code, displayName: p.nick, avatar: p.face })
+      .then((r) => {
+        if (r.reconnect) { connect(r.roomId); return; } // returning player — go straight back to their seat
+        setRoomInfo({ roomId: r.roomId, code: null, members: r.members ?? [], host: r.host ?? "" });
+        setScreen("lobby");
+      })
+      .catch((e) => pushToast(e instanceof Error ? e.message : "That invite has expired — ask for a fresh link"));
   }, [authed, pendingJoin, setRoomInfo, setScreen, pushToast]);
+
+  // reconnect-on-load: if this browser was in a live game and there's no fresh invite to act on,
+  // reconnect straight to that room by id (no code needed). If the room's gone, net gives up → home.
+  useEffect(() => {
+    if (!authed || pendingJoin) return;
+    const rid = storedRoom();
+    if (rid) connect(rid);
+    // run once auth resolves; connect + ViewUpdate flips the screen to the table
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed]);
 
   if (screen === "table") return <Table />;
   return (
@@ -150,10 +165,11 @@ function Home({ auth }: { auth: AuthState }) {
   };
   const join = async () => {
     try {
-      const r = await api<{ roomId: string; members: any[]; host: string }>("/api/rooms/join", { code, ...identity() });
-      setRoomInfo({ roomId: r.roomId, code: null, members: r.members, host: r.host });
+      const r = await api<{ roomId: string; members?: any[]; host?: string; reconnect?: boolean }>("/api/rooms/join", { code, ...identity() });
+      if (r.reconnect) { connect(r.roomId); return; } // returning member — straight back to the table
+      setRoomInfo({ roomId: r.roomId, code: null, members: r.members ?? [], host: r.host ?? "" });
       setScreen("lobby");
-    } catch { pushToast("Invalid or expired code"); }
+    } catch (e) { pushToast(e instanceof Error ? e.message : "Invalid or expired code"); }
   };
   return (
     <div style={{ fontFamily: SANS }}>

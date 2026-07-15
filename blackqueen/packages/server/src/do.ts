@@ -71,14 +71,21 @@ export class RoomDO implements DurableObject {
       case "/join": {
         const { code } = await req.json() as { code: string };
         const r = this.core.join(code, accountId, displayName, avatar);
-        if (!r.ok) return json({ error: "invalid or expired code" }, 404); // uniform (§3.3)
-        return json({ roomId: this.ctx.id.toString(), members: this.core.members, host: this.core.hostAccountId, phase: this.core.phase });
+        if (r.ok) return json({ roomId: this.ctx.id.toString(), members: this.core.members, host: this.core.hostAccountId, phase: this.core.phase });
+        // join failed — but the code may still resolve to a running game. A returning MEMBER reconnects
+        // straight to their seat; a stranger just learns the game already started.
+        if (code === this.core.inviteCode) {
+          if (this.core.members.some((m) => m.accountId === accountId)) return json({ roomId: this.ctx.id.toString(), reconnect: true });
+          if (this.core.phase !== "OPEN") return json({ error: "this game has already started" }, 409);
+        }
+        return json({ error: "invalid or expired code" }, 404); // uniform (§3.3)
       }
       case "/start": {
         const body = await req.json().catch(() => ({})) as { seatOrder?: string[] };
         const r = this.core.startGame(accountId, body.seatOrder);
         if (!r.ok) return json({ error: r.error }, 400);
-        await this.env.CODES.delete(`code:${this.core.inviteCode}`);
+        // Keep the invite code in KV through the game (deleted only on room destroy) so shared links and
+        // reloads still resolve to the room — a seated player who drops can reconnect via it.
         this.armTurnAlarm();
         return json({ ok: true });
       }

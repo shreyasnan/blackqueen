@@ -90,32 +90,50 @@ let ws: WebSocket | null = null;
 let roomId: string | null = null;
 let stateVersion = 0;
 let lastSeq = 0;
+let tries = 0; // consecutive reconnect attempts that never opened → give up (room ended / not a member)
 const eventBuffer = new Map<number, any>();
+const ROOM_KEY = "bq_room"; // the live room this browser belongs to — survives reload so we can rejoin
 
 export function getStateVersion() { return stateVersion; }
 export function getRoomId() { return roomId; }
+/** The room this browser was last in, for reconnect-on-load. */
+export function storedRoom(): string | null { return localStorage.getItem(ROOM_KEY); }
 
-/** Deliberate leave: kill the socket WITHOUT the auto-reconnect loop (roomId null gates it). */
+/** Deliberate leave: kill the socket WITHOUT the auto-reconnect loop, and forget the room. */
 export function disconnect(): void {
   const w = ws;
   ws = null;
   roomId = null;
   stateVersion = 0;
   lastSeq = 0;
+  tries = 0;
   eventBuffer.clear();
+  localStorage.removeItem(ROOM_KEY);
   try { w?.close(1000, "left"); } catch { /* already closed */ }
 }
 
 export async function connect(rid: string): Promise<void> {
   roomId = rid;
+  localStorage.setItem(ROOM_KEY, rid); // remember the room so a reload can reconnect (no code needed)
   if (ws) return;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   ws = new WebSocket(`${proto}//${location.host}/api/rooms/${rid}/ws${await q()}`);
   useStore.getState().setConnection("connecting");
-  ws.onopen = () => useStore.getState().setConnection("connected");
+  ws.onopen = () => { useStore.getState().setConnection("connected"); tries = 0; };
   ws.onmessage = (e) => handleMsg(JSON.parse(e.data));
   ws.onclose = () => {
     ws = null;
+    if (!roomId) return; // deliberate disconnect
+    tries += 1;
+    if (tries > 4) {
+      // repeated failures with no stable connection: the room ended, was destroyed, or we're no
+      // longer a member. Stop retrying, forget the room, and drop the player home.
+      localStorage.removeItem(ROOM_KEY);
+      roomId = null;
+      useStore.getState().pushToast("Couldn't rejoin — the game may have ended.");
+      useStore.getState().resetToHome();
+      return;
+    }
     useStore.getState().setConnection("reconnecting");
     setTimeout(() => roomId && connect(roomId), 1500); // fresh token on every reconnect
   };
