@@ -49,9 +49,36 @@ export async function initAuth(onReady: (a: AuthState | null) => void): Promise<
   document.head.appendChild(s);
 }
 
+// Themed to match the app (parchment / plum / gold), and OAuth-only: the email/identifier form and its
+// "or" divider are hidden so only Continue-with-Google/Apple show. (The fully-clean way to drop email is
+// to disable it as an identifier in the Clerk dashboard; this hides it client-side as well.)
+const CLERK_APPEARANCE = {
+  variables: {
+    colorPrimary: "#3b2247",
+    colorText: "#3b2247",
+    colorTextSecondary: "#5c4a6b",
+    colorBackground: "#fffdf7",
+    colorInputBackground: "#fffdf7",
+    colorInputText: "#3b2247",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    borderRadius: "12px",
+  },
+  elements: {
+    card: { boxShadow: "0 4px 22px rgba(40,20,50,.08)", border: "1px solid rgba(59,34,71,.08)", background: "#fffdf7" },
+    headerTitle: { fontFamily: "Georgia, 'Times New Roman', serif", fontWeight: "700" },
+    socialButtonsBlockButton: { borderRadius: "12px", borderColor: "rgba(59,34,71,.16)", padding: "12px 14px" },
+    socialButtonsBlockButtonText: { fontWeight: "500" },
+    formButtonPrimary: { background: "#c9992e", boxShadow: "none", textTransform: "none", fontWeight: "600" },
+    // OAuth-only: hide the email/identifier form, its divider, and the sign-up prompt
+    dividerRow: { display: "none" },
+    form: { display: "none" },
+    footerAction: { display: "none" },
+  },
+};
+
 export function mountClerkSignIn(el: HTMLElement): void {
   const wantSignUp = new URLSearchParams(location.search).get("mode") === "signup";
-  const opts = { signInUrl: "/", signUpUrl: "/?mode=signup" };
+  const opts = { signInUrl: "/", signUpUrl: "/?mode=signup", appearance: CLERK_APPEARANCE };
   if (wantSignUp) window.Clerk?.mountSignUp(el, opts);
   else window.Clerk?.mountSignIn(el, opts);
 }
