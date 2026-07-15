@@ -233,7 +233,7 @@ describe("practice bots", () => {
     const botAcct = r.members.find((m) => m.isBot)!.accountId;
     const botViews = bout.of(botAcct).filter((m) => m.t === "ViewUpdate");
     for (const vu of botViews) expect(vu.view.viewerSeat).toBe(r.seatOf.get(botAcct));
-  });
+  }, 60000); // bots now run Monte-Carlo search — allow generous headroom
 
   it("BOT-STUCK regression: 2-deck bot declarer calls DISTINCT identities and never wedges", () => {
     // Repro: 5 bots + 1 human, 2 decks. When a bot wins the standing bid it must call C
@@ -265,7 +265,7 @@ describe("practice bots", () => {
       // and the wedge fallback never had to fire:
       expect(bout.audits?.some?.((a: any) => a.anomaly === "bot_decision_rejected") ?? false).toBe(false);
     }
-  });
+  }, 60000); // bots now run Monte-Carlo search — allow generous headroom
 
   it("removeBot pops the last bot; bots can't be added mid-game", () => {
     const bout = new TestOut();

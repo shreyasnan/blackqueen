@@ -7,6 +7,7 @@ import {
   canonicalDeck, cardEq, SUITS, calledCardCount, rankIndex, minHandSize, maxHandSize,
   legalPlays, trickWinner, trickPoints, pointValue, RoundData,
 } from "@blackqueen/engine";
+import { mcTrickPlay } from "./mcbot.js";
 
 export type RoomPhase = "OPEN" | "IN_GAME" | "ENDED";
 
@@ -215,7 +216,14 @@ export class RoomCore {
       }
       case "TRICK_PLAY": {
         const led = r.currentTrick.length === 0 ? null : r.currentTrick[0]!.card.suit;
-        return { type: "PLAY_CARD", seat, card: this.botTrickCard(seat, r, g, led) };
+        // Monte-Carlo search (samples possible worlds, simulates to the end). Deterministic seed so
+        // replays match; falls back to the fast heuristic if the search bails or throws.
+        let card: Card | null = null;
+        try {
+          const seed = ((this.stateVersion * 2654435761) + seat * 40503 + g.roundNumber * 97) >>> 0;
+          card = mcTrickPlay(g, seat, 32, seed);
+        } catch { card = null; }
+        return { type: "PLAY_CARD", seat, card: card ?? this.botTrickCard(seat, r, g, led) };
       }
       default:
         throw new Error(`bot asked to act in ${g.phase}`);
