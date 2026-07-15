@@ -29,66 +29,55 @@ const EMOTES: Record<string, { face: string; label: string; bubble: string }> = 
   oof:        { face: "😬", label: "Oof",         bubble: "😬 Oof" },
   bakwaas:    { face: "😤", label: "Bakwaas",     bubble: "😤 Bakwaas" },
 };
-// wheel order: clockwise from the top
-const WHEEL_ORDER = ["gg", "waah", "mast", "abbe", "kya", "bakwaas", "oof", "newpartner", "chalo", "jaldi"];
+// quick-chat tray order (2 columns); the two long lines span both columns
+const CHAT_ORDER = ["abbe", "jaldi", "mast", "gg", "newpartner", "kya", "waah", "chalo", "oof", "bakwaas"];
+const WIDE_CHAT = new Set(["newpartner", "kya"]);
 
-/** Hold-to-open quick-chat wheel: press the button, flick to a reaction, release — or tap-open then tap.
- *  Broadcast-only, fixed set: expressive without becoming a signaling channel in a hidden-team game. */
-function QuickChatWheel() {
+/** Tap-to-open quick-chat tray: a bottom sheet of phrase chips. Broadcast-only, fixed set — no free
+ *  text, no targeting, so it can't become a covert signaling channel in a hidden-team game. */
+function QuickChatSheet() {
   const [open, setOpen] = useState(false);
-  const [hover, setHover] = useState<number | null>(null);
-  const holding = useRef(false);
   const lastSent = useRef(0);
   const send = (key: string) => {
-    setOpen(false); setHover(null); holding.current = false;
+    setOpen(false);
     const now = Date.now();
     if (now - lastSent.current < 700) return; // local debounce (server enforces the real rate limit)
     lastSent.current = now;
     sendAction("EMOTE", { emote: key });
     sfx.emote(); haptic(12);
   };
-  useEffect(() => {
-    if (!open) return;
-    const up = () => {
-      if (!holding.current) return;
-      holding.current = false;
-      if (hover != null) send(WHEEL_ORDER[hover]!); // flick-release landed on an item
-    };
-    window.addEventListener("pointerup", up);
-    return () => window.removeEventListener("pointerup", up);
-  }, [open, hover]); // eslint-disable-line react-hooks/exhaustive-deps
-  const R = 112;
   return (
     <>
-      <button aria-label="react"
-        onPointerDown={(e) => {
-          try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* fine */ }
-          if (open) { setOpen(false); holding.current = false; return; }
-          holding.current = true; setHover(null); setOpen(true); sfx.lift();
-        }}
+      <button aria-label="quick chat" onClick={() => { setOpen((o) => !o); sfx.lift(); }}
         style={{ position: "absolute", right: 12, bottom: 184, zIndex: 30, width: 48, height: 48, borderRadius: 24, border: "1.5px solid var(--gold)", background: "var(--card)", boxShadow: "0 3px 10px rgba(0,0,0,.28)", fontSize: 23, cursor: "pointer", display: "grid", placeItems: "center", opacity: 0.94 }}>
         😊
       </button>
       {open && (
         <>
-          <div onClick={() => { setOpen(false); holding.current = false; }} style={{ position: "absolute", inset: 0, zIndex: 40, background: "rgba(35,20,45,.3)" }} />
-          <div style={{ position: "absolute", left: "50%", top: "54%", transform: "translate(-50%,-50%)", zIndex: 41, width: 300, height: 300, pointerEvents: "none" }}>
-            <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 62, height: 62, borderRadius: 31, background: "rgba(255,253,247,.16)", border: "1.5px solid rgba(255,253,247,.5)", display: "grid", placeItems: "center", fontSize: 22 }}>😊</div>
-            {WHEEL_ORDER.map((key, i) => {
-              const ang = ((-90 + i * 36) * Math.PI) / 180;
-              const x = Math.cos(ang) * R, y = Math.sin(ang) * R;
-              const em = EMOTES[key]!; const on = hover === i;
-              return (
-                <button key={key} type="button"
-                  onPointerEnter={() => setHover(i)} onPointerLeave={() => setHover((h) => (h === i ? null : h))}
-                  onClick={() => send(key)}
-                  style={{ position: "absolute", left: `calc(50% + ${x}px)`, top: `calc(50% + ${y}px)`, transform: "translate(-50%,-50%)", pointerEvents: "auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: 66, border: 0, background: "transparent", cursor: "pointer", padding: 0 }}>
-                  <span style={{ width: 50, height: 50, borderRadius: 25, background: "var(--card)", display: "grid", placeItems: "center", fontSize: 24, border: on ? "2.5px solid var(--gold)" : "1px solid rgba(59,34,71,.15)", boxShadow: on ? "0 0 14px rgba(201,153,46,.7)" : "0 2px 6px rgba(0,0,0,.25)", transform: on ? "scale(1.12)" : "scale(1)", transition: "transform .1s ease" }}>{em.face}</span>
-                  <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", textShadow: "0 1px 3px rgba(0,0,0,.6)" }}>{em.label}</span>
-                </button>
-              );
-            })}
-          </div>
+          <div onClick={() => setOpen(false)} style={{ position: "absolute", inset: 0, zIndex: 40, background: "rgba(24,44,38,.4)" }} />
+          <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={SPRING_SOFT}
+            style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--parchment)", borderRadius: "24px 24px 0 0", boxShadow: "0 -8px 28px rgba(0,0,0,.28)", padding: "12px 14px calc(20px + env(safe-area-inset-bottom))" }}>
+            <div style={{ maxWidth: 460, margin: "0 auto" }}>
+              <div style={{ width: 38, height: 4, borderRadius: 2, background: "rgba(59,34,71,.18)", margin: "0 auto 12px" }} />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 4px 12px" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: 0.4, color: "var(--ink-soft)", textTransform: "uppercase" }}>Quick chat</div>
+                <button aria-label="close quick chat" onClick={() => setOpen(false)}
+                  style={{ width: 28, height: 28, borderRadius: 14, background: "rgba(59,34,71,.08)", border: 0, cursor: "pointer", color: "var(--ink-soft)", fontSize: 14, display: "grid", placeItems: "center" }}>✕</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+                {CHAT_ORDER.map((key) => {
+                  const em = EMOTES[key]!;
+                  const phrase = em.bubble.slice(em.face.length + 1); // full phrase, emoji prefix stripped
+                  return (
+                    <button key={key} type="button" onClick={() => send(key)}
+                      style={{ display: "flex", alignItems: "center", gap: 9, background: "var(--card)", border: "1px solid rgba(59,34,71,.1)", borderRadius: 13, padding: "11px 12px", fontSize: 14.5, color: "var(--ink)", cursor: "pointer", boxShadow: "0 1px 3px rgba(40,20,50,.05)", textAlign: "left", gridColumn: WIDE_CHAT.has(key) ? "span 2" : undefined }}>
+                      <span style={{ fontSize: 19, lineHeight: 1 }}>{em.face}</span>{phrase}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
         </>
       )}
     </>
@@ -212,7 +201,7 @@ export function Table() {
         </div>
         {wide && <ActivitySidebar view={view} isHost={isHost} />}
       </div>
-      {view.phase !== "GAME_END" && <QuickChatWheel />}
+      {view.phase !== "GAME_END" && <QuickChatSheet />}
       <LastTrickModal view={view} />
       <LeaderboardModal view={view} open={lbOpen} onClose={() => setLbOpen(false)} />
       <DeclarerSetupModal view={view} />
