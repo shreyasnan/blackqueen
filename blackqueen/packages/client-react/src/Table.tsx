@@ -18,19 +18,19 @@ const AVATARS = ["🦊", "🦉", "🐱", "🦡", "🐰", "🦝", "🐸"];
 const SEAT_COLORS = ["#e0684b", "#2e8f83", "#c9992e", "#7b5ea7", "#4a7fb5", "#b5527f", "#6b8e3f"];
 // Quick-chat set (broadcast-only, fixed — keeps the hidden-team game clean; no free text, no targeting).
 const EMOTES: Record<string, { face: string; label: string; bubble: string }> = {
-  hi:         { face: "👋", label: "Hi",          bubble: "👋" },
-  haha:       { face: "😂", label: "Haha",        bubble: "😂" },
-  wow:        { face: "😮", label: "Wow",         bubble: "😮" },
-  wellplayed: { face: "👏", label: "Well played", bubble: "👏 Well played" },
-  gg:         { face: "🫡", label: "GG",          bubble: "🫡 GG" },
-  bringit:    { face: "😤", label: "Bring it",    bubble: "😤 Bring it" },
-  queen:      { face: "👸", label: "The Queen",   bubble: "👸 The Queen!" },
-  soclose:    { face: "😬", label: "So close",    bubble: "😬 So close" },
-  oops:       { face: "🙈", label: "Oops",        bubble: "🙈" },
-  phew:       { face: "😅", label: "Phew",        bubble: "😅" },
+  abbe:       { face: "😏", label: "Abbe!",       bubble: "😏 Abbe!" },
+  jaldi:      { face: "⚡", label: "Jaldi chal",  bubble: "⚡ Jaldi chal" },
+  mast:       { face: "🔥", label: "Mast",        bubble: "🔥 Mast!" },
+  gg:         { face: "🤝", label: "Good game",   bubble: "🤝 Good game" },
+  newpartner: { face: "🙄", label: "New partner", bubble: "🙄 I need a new partner" },
+  kya:        { face: "🤦", label: "Kya kar?",    bubble: "🤦 Kya kar raha hai" },
+  waah:       { face: "👏", label: "Waah!",       bubble: "👏 Waah!" },
+  chalo:      { face: "⏩", label: "Chalo chalo", bubble: "⏩ Chalo chalo" },
+  oof:        { face: "😬", label: "Oof",         bubble: "😬 Oof" },
+  bakwaas:    { face: "😤", label: "Bakwaas",     bubble: "😤 Bakwaas" },
 };
 // wheel order: clockwise from the top
-const WHEEL_ORDER = ["wellplayed", "haha", "wow", "gg", "bringit", "queen", "soclose", "oops", "phew", "hi"];
+const WHEEL_ORDER = ["gg", "waah", "mast", "abbe", "kya", "bakwaas", "oof", "newpartner", "chalo", "jaldi"];
 
 /** Hold-to-open quick-chat wheel: press the button, flick to a reaction, release — or tap-open then tap.
  *  Broadcast-only, fixed set: expressive without becoming a signaling channel in a hidden-team game. */
