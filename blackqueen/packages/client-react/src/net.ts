@@ -79,11 +79,11 @@ const CLERK_APPEARANCE = {
     socialButtonsBlockButton__apple: { background: "linear-gradient(180deg,#242a20,#15170f)" },
     socialButtonsBlockButtonText: { color: "#f2ead6", fontWeight: "600" },
     socialButtonsProviderInitialIcon: { color: "#f2ead6" },
-    badge: { background: "transparent" },
-    // OAuth-only + no card footer/branding box: hide the email form, divider, footer, and sign-up prompt
+    badge: { display: "none" }, // drop the clipped "Last used" tab on the provider button
+    // OAuth-only + no card chrome: hide the email form, divider, the striped dev-mode footer, and sign-up prompt
     dividerRow: { display: "none" },
     form: { display: "none" },
-    footer: { background: "transparent", boxShadow: "none" },
+    footer: { display: "none" },
     footerAction: { display: "none" },
   },
 };
