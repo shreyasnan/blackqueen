@@ -276,15 +276,18 @@ function Center28({ view }: { view: NonNullable<ReturnType<typeof useStore28.get
   const r = view.round;
   const me = view.mySeat ?? 0;
   if (!r) return null;
-  if (r.trick.length > 0) {
-    // each played card sits in front of its player, around the centre (position = attribution)
+  // Show the live trick, or — in the gap between tricks — the just-completed one with the winner lit.
+  const shown = r.trick.length > 0
+    ? r.trick.map((p) => ({ seat: p.seat, card: p.card, win: false }))
+    : (r.lastTrick ? r.lastTrick.plays.map((p) => ({ seat: p.seat, card: p.card, win: p.seat === r.lastTrick!.winner })) : []);
+  if (shown.length > 0) {
     const off: Record<number, [number, number]> = { 0: [0, 60], 1: [70, 0], 2: [0, -60], 3: [-70, 0] };
     return (
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-        {r.trick.map((p) => {
+        {shown.map((p) => {
           const [dx, dy] = off[(p.seat - me + 4) % 4]!;
           return (
-            <div key={p.seat} style={{ position: "absolute", left: "50%", top: "45%", transform: `translate(-50%,-50%) translate(${dx}px,${dy}px)` }}>
+            <div key={p.seat} style={{ position: "absolute", left: "50%", top: "45%", transform: `translate(-50%,-50%) translate(${dx}px,${dy}px)`, borderRadius: 9, boxShadow: p.win ? "0 0 0 3px var(--gold), 0 6px 14px rgba(0,0,0,.5)" : undefined }}>
               <Card28View card={p.card} w={44} />
             </div>
           );
