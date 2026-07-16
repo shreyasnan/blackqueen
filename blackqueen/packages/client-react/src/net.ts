@@ -49,29 +49,41 @@ export async function initAuth(onReady: (a: AuthState | null) => void): Promise<
   document.head.appendChild(s);
 }
 
-// Themed to match the app (parchment / plum / gold), and OAuth-only: the email/identifier form and its
-// "or" divider are hidden so only Continue-with-Google/Apple show. (The fully-clean way to drop email is
-// to disable it as an identifier in the Clerk dashboard; this hides it client-side as well.)
+// Real Card Club theme: no white card — the widget blends into the ivory page, and the Google/Apple
+// buttons match the dark "Play as guest" button. OAuth-only: the email/identifier form + divider are
+// hidden so only Continue-with-Google/Apple show. (The clean way to drop email is to disable it as an
+// identifier in the Clerk dashboard; this hides it client-side too.)
 const CLERK_APPEARANCE = {
   variables: {
-    colorPrimary: "#3b2247",
-    colorText: "#3b2247",
-    colorTextSecondary: "#5c4a6b",
-    colorBackground: "#fffdf7",
-    colorInputBackground: "#fffdf7",
-    colorInputText: "#3b2247",
+    colorPrimary: "#26402f",
+    colorText: "#26402f",
+    colorTextSecondary: "#5f5a44",
+    colorBackground: "#efe7db",
+    colorInputBackground: "#f7f1e5",
+    colorInputText: "#26402f",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    borderRadius: "12px",
+    borderRadius: "14px",
   },
   elements: {
-    card: { boxShadow: "0 4px 22px rgba(40,20,50,.08)", border: "1px solid rgba(59,34,71,.08)", background: "#fffdf7" },
-    headerTitle: { fontFamily: "Georgia, 'Times New Roman', serif", fontWeight: "700" },
-    socialButtonsBlockButton: { borderRadius: "12px", borderColor: "rgba(59,34,71,.16)", padding: "12px 14px" },
-    socialButtonsBlockButtonText: { fontWeight: "500" },
-    formButtonPrimary: { background: "#c9992e", boxShadow: "none", textTransform: "none", fontWeight: "600" },
-    // OAuth-only: hide the email/identifier form, its divider, and the sign-up prompt
+    // strip the card chrome so the widget sits flat on the page (no white box, no shadow, no striped footer)
+    rootBox: { width: "100%" },
+    cardBox: { boxShadow: "none", border: "none", background: "transparent" },
+    card: { boxShadow: "none", border: "none", background: "transparent", padding: "0" },
+    header: { display: "none" }, // the page already shows the Black Queen wordmark + tagline
+    // Google/Apple styled like the dark "Play as guest" button (charcoal, ivory text, lit top edge)
+    socialButtonsBlockButton: {
+      background: "linear-gradient(180deg,#242a20,#15170f)", color: "#f2ead6",
+      border: "none", borderRadius: "14px", padding: "14px 16px", minHeight: "52px",
+      boxShadow: "0 6px 14px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.08)",
+    },
+    socialButtonsBlockButton__apple: { background: "linear-gradient(180deg,#242a20,#15170f)" },
+    socialButtonsBlockButtonText: { color: "#f2ead6", fontWeight: "600" },
+    socialButtonsProviderInitialIcon: { color: "#f2ead6" },
+    badge: { background: "transparent" },
+    // OAuth-only + no card footer/branding box: hide the email form, divider, footer, and sign-up prompt
     dividerRow: { display: "none" },
     form: { display: "none" },
+    footer: { background: "transparent", boxShadow: "none" },
     footerAction: { display: "none" },
   },
 };
