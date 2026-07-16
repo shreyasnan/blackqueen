@@ -3,24 +3,35 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#2a1a33" />
+  <meta name="theme-color" content="#16211a" />
   <title>Black Queen</title>
   <style>
     :root {
-      --parchment:#f3e9d7; --ink:#3b2247; --ink-soft:#5c4a6b; --gold:#c9992e; --coral:#e0684b;
-      --teal:#2e8f83; --card:#fffdf7; --shadow:rgba(59,34,71,.25);
+      /* Real Card Club — one warm light above center. Warm ivory, deep forest, charcoal, muted plum, wood. */
+      --parchment:#efe7db; --ink:#26402f; --ink-soft:#5f5a44; --gold:#c2a24a; --coral:#a8542e;
+      --teal:#2e7d6b; --card:#f7f1e5; --shadow:rgba(46,34,16,.20);
+      --plum:#3a2a45; --plum-2:#2a1c3e;
+      --felt-a:#3a563f; --felt-b:#284834; --felt-c:#17291d;
+      --wood-a:#6d4c2b; --wood-b:#48301a; --wood-c:#281607;
+      --charcoal:#14150f; --charcoal-2:#1f231b; --ivory:#f2ead6;
     }
     * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
     html,body,#root { height:100%; }
-    body { background:var(--parchment); color:var(--ink); font:15px/1.45 Georgia,'Iowan Old Style',serif;
-           overscroll-behavior:none; }
+    /* Lobby canvas: soft overhead bloom fading to a darker warm-neutral periphery (same light as the table). */
+    body { background:radial-gradient(125% 82% at 50% -12%, #f6f1e8 0%, #ece4d6 54%, #ddd5c4 100%) fixed;
+           color:var(--ink); font:15px/1.45 Georgia,'Iowan Old Style',serif; overscroll-behavior:none; }
     button { font:inherit; transition: transform .12s ease, filter .12s ease, box-shadow .12s ease; }
-    button:hover:not(:disabled) { filter: brightness(1.07); }
+    button:hover:not(:disabled) { filter: brightness(1.06); }
     button:active:not(:disabled) { transform: scale(.96); }
     button:focus-visible, input:focus-visible { outline: 2.5px solid var(--gold); outline-offset: 2px; }
     input { transition: border-color .12s ease; }
-    ::selection { background: rgba(201,153,46,.35); }
-    @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+    ::selection { background: rgba(194,162,74,.35); }
+    /* Slow, subtle overhead-light breathing — reused by the bloom overlay and the active-player rim. */
+    @keyframes bqBloom { 0%,100%{opacity:.82} 50%{opacity:1} }
+    @keyframes bqRim { 0%,100%{box-shadow:0 0 0 2px rgba(242,234,214,.5),0 0 13px 2px rgba(232,214,176,.26)}
+                       50%{box-shadow:0 0 0 2px rgba(242,234,214,.66),0 0 19px 4px rgba(232,214,176,.4)} }
+    .bq-bloom { animation: bqBloom 9s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { button { transition: none; } .bq-bloom { animation: none; } }
   </style>
 </head>
 <body>

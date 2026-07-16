@@ -485,9 +485,18 @@ function LastTrickModal({ view: v }: { view: ExtendedView }) {
   );
 }
 
+/** The gameplay stage: a dark room lit by one warm source above center. The bloom (top) and vignette
+ *  (periphery) are painted here once so every panel, seat, and card below sits in the same light. */
 const Shell = ({ children, wide }: { children: React.ReactNode; wide: boolean }) => (
-  <div style={{ display: "flex", flexDirection: "column", height: "100dvh", maxWidth: wide ? 1400 : 1100, margin: "0 auto", padding: "6px 10px 4px", position: "relative", overflow: "hidden" }}>
-    {children}
+  <div style={{ height: "100dvh", position: "relative", overflow: "hidden",
+    background: "radial-gradient(135% 95% at 50% 4%, #23241c 0%, #16170f 58%, #0c0d08 100%)" }}>
+    {/* overhead bloom — a soft warm ceiling glow, slowly breathing */}
+    <div className="bq-bloom" aria-hidden style={{ position: "absolute", top: "-14%", left: "50%", transform: "translateX(-50%)", width: "min(760px,120%)", height: "42%", background: "radial-gradient(ellipse at center, rgba(255,244,222,.13), rgba(255,244,222,0) 70%)", pointerEvents: "none", zIndex: 0 }} />
+    {/* peripheral vignette — the room falls off into shadow at the edges */}
+    <div aria-hidden style={{ position: "absolute", inset: 0, background: "radial-gradient(130% 105% at 50% 40%, rgba(0,0,0,0) 55%, rgba(0,0,0,.5) 100%)", pointerEvents: "none", zIndex: 0 }} />
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", maxWidth: wide ? 1400 : 1100, margin: "0 auto", padding: "6px 10px 4px", position: "relative", zIndex: 1 }}>
+      {children}
+    </div>
   </div>
 );
 
@@ -519,7 +528,7 @@ function HUD({ view: v, onMute, onLeaderboard }: { view: ExtendedView; onMute: (
           }}>
           ↩
         </button>
-        <div style={{ fontSize: 13, color: "var(--ink-soft)", fontWeight: 700, letterSpacing: 0.4, whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 13, color: "rgba(242,234,214,.82)", fontWeight: 700, letterSpacing: 0.4, whiteSpace: "nowrap" }}>
           ROUND {v.roundNumber}<span style={{ opacity: 0.5 }}>/{v.N}</span>
         </div>
       </div>
@@ -689,15 +698,16 @@ function SeatChip({ view: v, seat, big, bubbles, muted, onToggleMute }: { view: 
   // smaller and rounder, so more felt shows through (was a chunky rounded-square box).
   const faceSize = big ? 42 : 34;
   const ringD = faceSize + 10;
-  const ringColor = side === "def" ? "#2e8f83" : side === "team" ? "#c9992e" : active ? "#c9992e" : team ? SEAT_COLORS[seat % SEAT_COLORS.length]! : "rgba(59,34,71,.32)";
+  // The active player catches a soft warm rim from the overhead light (restrained ivory, not gold).
+  const ringColor = side === "def" ? "var(--teal)" : side === "team" ? "var(--gold)" : active ? "#efe3c4" : team ? SEAT_COLORS[seat % SEAT_COLORS.length]! : "rgba(242,234,214,.28)";
   const ringGlow = active
     ? (side === "def"
-        ? ["0 0 10px rgba(46,143,131,.55)", "0 0 22px rgba(46,143,131,1)", "0 0 10px rgba(46,143,131,.55)"]
-        : ["0 0 10px rgba(201,153,46,.55)", "0 0 22px rgba(201,153,46,1)", "0 0 10px rgba(201,153,46,.55)"])
-    : side === "team" ? "0 0 10px rgba(201,153,46,.5)"
-    : side === "def" ? "0 0 7px rgba(46,143,131,.4)"
-    : "0 2px 6px rgba(0,0,0,.3)";
-  const nameTint = side === "def" ? "#bfeede" : side === "team" ? "#ffe6a6" : "#fdf7ea";
+        ? ["0 0 10px rgba(46,125,107,.5)", "0 0 22px rgba(46,125,107,.95)", "0 0 10px rgba(46,125,107,.5)"]
+        : ["0 0 10px rgba(242,232,212,.4)", "0 0 20px rgba(232,214,176,.85)", "0 0 10px rgba(242,232,212,.4)"])
+    : side === "team" ? "0 0 10px rgba(194,162,74,.5)"
+    : side === "def" ? "0 0 7px rgba(46,125,107,.4)"
+    : "0 3px 8px rgba(0,0,0,.5)";
+  const nameTint = side === "def" ? "#bfeede" : side === "team" ? "#ffe6a6" : "#f2ead6";
   const roleColor = side === "def" ? "#8fe0cd" : "#ffcf85";
 
   return (
@@ -820,22 +830,27 @@ function PokerTable({ view: v, bubbles, muted, onToggleMute }: { view: ExtendedV
   return (
     <div style={{ flex: 1, minHeight: 300, position: "relative", margin: "2px 0", paddingTop: 22 }}>
       {/* paddingTop pushes the seats down so the top seat's turn-pointer clears the partner banner */}
-      {/* rail */}
+      {/* natural wood rail — lit on the top edge, shaded below (light from above) */}
       <div style={{
         position: "absolute", inset: "6% 2%", borderRadius: "50% / 42%",
-        background: "linear-gradient(160deg, #8a6a2f, #c9992e 45%, #7a5d28)",
-        boxShadow: "0 10px 30px rgba(59,34,71,.35), inset 0 -3px 8px rgba(0,0,0,.25)",
+        background: "linear-gradient(180deg, var(--wood-a) 0%, var(--wood-b) 44%, var(--wood-c) 100%)",
+        boxShadow: "0 14px 30px rgba(0,0,0,.55), inset 0 2px 1px rgba(255,222,170,.32), inset 0 -4px 6px rgba(0,0,0,.5)",
       }} />
-      {/* felt with vignette */}
+      {/* center-lit felt: bright under the overhead light, sinking to shadow at the rim */}
       <div style={{
         position: "absolute", inset: "8.5% 4%", borderRadius: "50% / 42%",
-        background: "radial-gradient(ellipse at 50% 38%, #3a8a75 0%, #2e6f5e 55%, #235345 100%)",
-        boxShadow: "inset 0 6px 26px rgba(0,0,0,.38), inset 0 -10px 40px rgba(0,0,0,.22)",
+        background: "radial-gradient(ellipse at 50% 34%, var(--felt-a) 0%, var(--felt-b) 52%, var(--felt-c) 100%)",
+        boxShadow: "inset 0 8px 30px rgba(0,0,0,.45), inset 0 -12px 44px rgba(0,0,0,.32)",
+      }} />
+      {/* soft pool of light on the felt, directly beneath the source */}
+      <div aria-hidden style={{
+        position: "absolute", inset: "8.5% 4%", borderRadius: "50% / 42%", pointerEvents: "none",
+        background: "radial-gradient(60% 44% at 50% 30%, rgba(255,248,225,.10), rgba(255,248,225,0) 62%)",
       }} />
       {/* betting line: the classic inner ring that frames where cards land */}
       <div style={{
         position: "absolute", inset: "22% 18%", borderRadius: "50% / 44%",
-        border: "1.5px solid rgba(255,253,247,.14)", pointerEvents: "none",
+        border: "1.5px solid rgba(255,246,220,.12)", pointerEvents: "none",
       }} />
       {/* subtle center mark */}
       <WatermarkQueen />
@@ -1058,14 +1073,31 @@ function BidBox({ view: v }: { view: ExtendedView }) {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [min, val, cap]);
+  // stepper tiles carry a barely-there tint (mauve − / neutral readout / green +); Bid & Pass are equal-weight CTAs.
+  const tile = (a: string, b: string): React.CSSProperties => ({
+    background: `linear-gradient(180deg,${a},${b})`, color: "var(--ivory)", border: 0, borderRadius: 10,
+    padding: "9px 12px", fontWeight: 700, fontSize: 15, cursor: "pointer", boxShadow: "inset 0 1px 0 rgba(255,255,255,.06)",
+  });
+  const cta = (a: string, b: string): React.CSSProperties => ({
+    flex: 1, background: `linear-gradient(180deg,${a},${b})`, color: "var(--ivory)", border: 0, borderRadius: 11,
+    padding: "11px", fontWeight: 700, fontSize: 15, cursor: "pointer",
+    boxShadow: "0 5px 11px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.13), inset 0 -2px 4px rgba(0,0,0,.25)",
+  });
   return (
-    <Row>
-      <button style={btnSec} onClick={() => setVal((x) => Math.max(min, x - 5))}>−5</button>
-      <b style={{ fontSize: 24, minWidth: 52, textAlign: "center" }}>{val}</b>
-      <button style={btnSec} onClick={() => setVal((x) => Math.min(cap, x + 5))}>+5</button>
-      <button style={btn} onClick={() => sendAction("BID", { value: val })}>Bid {val}</button>
-      <button style={{ ...btnSec, marginLeft: 20 }} onClick={() => sendAction("PASS", {})}>Pass</button>
-    </Row>
+    <div style={{ background: "linear-gradient(180deg,#1c211b,#12160f)", borderRadius: 15, padding: "10px", width: "min(560px,96vw)", boxShadow: "0 9px 18px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05)", display: "flex", flexDirection: "column", gap: 7 }}>
+      <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+          <button aria-label="lower bid" style={tile("#2f2833", "#221d27")} onClick={() => setVal((x) => Math.max(min, x - 5))}>−5</button>
+          <div style={{ ...tile("#282a22", "#1d1f18"), minWidth: 48, textAlign: "center", fontSize: 17, cursor: "default", color: "#f3ecd8" }}>{val}</div>
+          <button aria-label="raise bid" style={tile("#26301f", "#1c2417")} onClick={() => setVal((x) => Math.min(cap, x + 5))}>+5</button>
+        </div>
+        <div style={{ flex: 1, display: "flex", gap: 7 }}>
+          <button style={cta("#33543a", "#22412a")} onClick={() => sendAction("BID", { value: val })}>Bid {val}</button>
+          <button style={cta("#3c2a52", "#2a1c3e")} onClick={() => sendAction("PASS", {})}>Pass</button>
+        </div>
+      </div>
+      <div style={{ fontSize: 10.5, color: "#8f8a78", textAlign: "center" }}>Min bid {min} · Raise by 5</div>
+    </div>
   );
 }
 
@@ -1141,7 +1173,7 @@ function Hand({ view: v }: { view: ExtendedView }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
       {overflows && (
-        <div style={{ alignSelf: "flex-end", paddingRight: 6, fontSize: 10, color: "var(--ink-soft)" }}>⟷ swipe the fan</div>
+        <div style={{ alignSelf: "flex-end", paddingRight: 6, fontSize: 10, color: "rgba(242,234,214,.6)" }}>⟷ swipe the fan</div>
       )}
     <div style={{
       position: "relative", display: "flex", justifyContent: overflows ? "flex-start" : "center", alignItems: "flex-end",
@@ -1228,20 +1260,24 @@ function DraggableCard({ card, interactive, variant, preselected, dimmed, focuse
 function CardFace({ card, small, highlight, single, width }: { card: Card; small?: boolean; highlight?: boolean; single?: boolean; width?: number }) {
   const w = width ?? (small ? 52 : 66); // bigger baseline; everything below scales from w
   const f = w / 64; // typography scale factor
-  const color = red(card.suit) ? "var(--coral)" : "var(--ink)";
+  const color = red(card.suit) ? "#b23324" : "#1c1c1a"; // real-card ink: deep red / near-black
   const queen = isQS(card);
   const court = card.rank === "J" || card.rank === "Q" || card.rank === "K";
   const point = pv(card) > 0;
   return (
     <div style={{
-      width: w, height: w * 1.42, background: queen ? "linear-gradient(160deg,#fffdf7,#f2e2bd)" : "linear-gradient(170deg,#fffefb,#faf4e6)",
+      width: w, height: w * 1.42,
+      // aged-ivory stock with fine paper grain, lit from above (bright top, soft ambient-occlusion base)
+      backgroundImage: queen
+        ? "radial-gradient(120% 90% at 50% 0%, #fbf5e6, #f0e2bd 92%)"
+        : "repeating-linear-gradient(92deg, rgba(120,96,60,.04) 0 1px, transparent 1px 3px), radial-gradient(120% 90% at 50% 0%, #f7f0e2, #e8decb 92%)",
       borderRadius: 9 * f + 3, position: "relative",
-      border: `2px solid ${highlight ? "var(--gold)" : queen ? "var(--gold)" : "rgba(59,34,71,.22)"}`,
-      boxShadow: highlight ? "0 6px 16px rgba(201,153,46,.5)" : "0 1.5px 4px var(--shadow)",
+      border: `${queen || highlight ? 2 : 1}px solid ${highlight ? "var(--gold)" : queen ? "var(--gold)" : "rgba(90,70,45,.24)"}`,
+      boxShadow: highlight ? "0 8px 18px rgba(194,162,74,.5), inset 0 1px 0 rgba(255,255,255,.7)" : "0 6px 13px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.72)",
       color, userSelect: "none", overflow: "hidden",
     }}>
       {/* woodcut inner frame */}
-      <div style={{ position: "absolute", inset: 3 * f, borderRadius: 5, border: "1px solid rgba(59,34,71,.10)", pointerEvents: "none" }} />
+      <div style={{ position: "absolute", inset: 3 * f, borderRadius: 5, border: "1px solid rgba(90,70,45,.1)", pointerEvents: "none" }} />
       <div style={{ position: "absolute", top: 2.5 * f, left: 4.5 * f, fontSize: 18 * f, fontWeight: 800, lineHeight: 0.98, fontFamily: "Georgia,serif" }}>
         {card.rank}<br /><span style={{ fontSize: 15.5 * f }}>{GLYPH[card.suit]}</span>
       </div>
@@ -1251,7 +1287,7 @@ function CardFace({ card, small, highlight, single, width }: { card: Card; small
         ) : court ? ( // court medallion: rank letter framed in suit color (woodcut stand-in)
           <span style={{
             width: 29 * f, height: 29 * f, borderRadius: "50%", display: "grid", placeItems: "center",
-            border: `1.5px solid ${red(card.suit) ? "rgba(224,104,75,.55)" : "rgba(59,34,71,.4)"}`,
+            border: `1.5px solid ${red(card.suit) ? "rgba(178,51,36,.5)" : "rgba(28,28,26,.4)"}`,
             fontSize: 18 * f, fontWeight: 900, fontFamily: "Georgia,serif",
           }}>
             {card.rank}
@@ -1767,10 +1803,10 @@ function GameEnd({ view: v }: { view: ExtendedView }) {
   ].filter(Boolean) as string[];
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} style={{ textAlign: "center", padding: 16, margin: "auto 0" }}>
-      <h2 style={{ margin: "6px 0", fontSize: 26 }}>♛ Game over</h2>
+      <h2 style={{ margin: "6px 0", fontSize: 26, color: "var(--ivory)" }}>♛ Game over</h2>
       {ranked.map(({ s, t }, i) => (
         <motion.div key={s} initial={{ opacity: 0, x: -14 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.12 }}
-          style={{ fontSize: t === top ? 22 : 15, fontWeight: t === top ? 800 : 400, color: t === top ? "var(--gold)" : "var(--ink)", padding: 2 }}>
+          style={{ fontSize: t === top ? 22 : 15, fontWeight: t === top ? 800 : 400, color: t === top ? "var(--gold)" : "var(--ivory)", padding: 2 }}>
           {t === top ? "♛ " : `${i + 1}. `}<Face id={faceOf(v, s)} size={t === top ? 24 : 18} /> {name(s)}{s === v.viewerSeat ? " (you)" : ""} — {t}
         </motion.div>
       ))}

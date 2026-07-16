@@ -5,7 +5,7 @@ import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
 
-export const BUILD_TAG = "ui-42-ten-players"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-43-card-club"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -56,8 +56,9 @@ export function App() {
   return (
     <div style={{ maxWidth: 440, margin: "0 auto", padding: "clamp(16px,4vw,26px)", fontFamily: SANS }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, margin: "8px 0 20px" }}>
-        <h1 style={{ fontFamily: SERIF, fontSize: "clamp(25px,7vw,31px)", fontWeight: 700, margin: 0, letterSpacing: 0.2 }}>
-          Black <span style={{ color: "var(--gold)" }}>Queen</span>
+        <h1 style={{ fontFamily: SERIF, fontSize: "clamp(25px,7vw,31px)", fontWeight: 700, margin: 0, letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ color: "var(--ink)", fontSize: "0.9em" }}>♠</span>
+          <span><span style={{ color: "#1c2a20" }}>Black</span> <span style={{ color: "var(--ink)" }}>Queen</span></span>
         </h1>
         <span style={{ fontSize: 10.5, opacity: 0.4, whiteSpace: "nowrap" }}>{BUILD_TAG}</span>
       </div>
@@ -414,18 +415,20 @@ function Lobby({ auth }: { auth: AuthState }) {
   );
 }
 
-export const btn: React.CSSProperties = { background: "var(--gold)", color: "#fff", border: 0, borderRadius: 8, padding: "10px 16px", fontWeight: 700, cursor: "pointer" };
-export const btnSec: React.CSSProperties = { background: "var(--ink)", color: "var(--parchment)", border: 0, borderRadius: 8, padding: "10px 16px", cursor: "pointer" };
+// Primary = forest green (commit); secondary = neutral charcoal; both lit from above (top highlight, AO base).
+export const btn: React.CSSProperties = { background: "linear-gradient(180deg,#33543a,#22412a)", color: "var(--ivory)", border: 0, borderRadius: 8, padding: "10px 16px", fontWeight: 700, cursor: "pointer", boxShadow: "inset 0 1px 0 rgba(255,255,255,.12), 0 3px 8px rgba(0,0,0,.28)" };
+export const btnSec: React.CSSProperties = { background: "var(--charcoal-2)", color: "var(--ivory)", border: 0, borderRadius: 8, padding: "10px 16px", cursor: "pointer", boxShadow: "inset 0 1px 0 rgba(255,255,255,.07)" };
 export const inp: React.CSSProperties = { background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 8, padding: "10px" };
 
 /* ---- v3 corridor design (Home/Lobby): clean sans UI, serif wordmark, soft surfaces, mobile-first ---- */
 const SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 const SERIF = "Georgia, 'Iowan Old Style', 'Times New Roman', serif";
-const surfaceCard: React.CSSProperties = { background: "var(--card)", border: "1px solid rgba(59,34,71,.08)", borderRadius: 20, boxShadow: "0 2px 16px rgba(40,20,50,.05)" };
-const primaryBtn: React.CSSProperties = { width: "100%", background: "var(--gold)", color: "#fff", border: 0, borderRadius: 15, padding: "15px", fontSize: 16, fontWeight: 600, cursor: "pointer", boxShadow: "0 4px 14px rgba(184,137,43,.28)" };
-const inkBtn: React.CSSProperties = { background: "var(--ink)", color: "#f7efe1", border: 0, borderRadius: 14, padding: "13px 18px", fontSize: 14.5, fontWeight: 500, cursor: "pointer" };
-const ghostBtn: React.CSSProperties = { width: "100%", background: "transparent", border: "1px solid rgba(59,34,71,.16)", color: "var(--ink-soft)", borderRadius: 15, padding: "13px", fontSize: 14.5, cursor: "pointer" };
-const field: React.CSSProperties = { width: "100%", background: "var(--card)", border: "1px solid rgba(59,34,71,.14)", borderRadius: 14, padding: "13px 15px", fontSize: 15.5, minHeight: 50, color: "var(--ink)", fontFamily: SANS };
+// Surfaces catch the overhead light: bright top edge, soft ambient-occlusion shadow beneath.
+const surfaceCard: React.CSSProperties = { background: "linear-gradient(180deg,#fbf6ea,#f2ebda)", border: "1px solid rgba(70,52,26,.12)", borderRadius: 20, boxShadow: "0 10px 22px rgba(46,34,16,.12), inset 0 1px 0 rgba(255,252,244,.9)" };
+const primaryBtn: React.CSSProperties = { width: "100%", background: "linear-gradient(180deg,#2f5138,#213c2b)", color: "var(--ivory)", border: 0, borderRadius: 15, padding: "15px", fontSize: 16, fontWeight: 600, cursor: "pointer", boxShadow: "0 8px 16px rgba(24,44,30,.30), inset 0 1px 0 rgba(255,255,255,.14), inset 0 -2px 5px rgba(0,0,0,.22)" };
+const inkBtn: React.CSSProperties = { background: "linear-gradient(180deg,#40304e,#2c1e40)", color: "var(--ivory)", border: 0, borderRadius: 14, padding: "13px 18px", fontSize: 14.5, fontWeight: 500, cursor: "pointer", boxShadow: "0 6px 14px rgba(30,20,40,.28), inset 0 1px 0 rgba(255,255,255,.12)" };
+const ghostBtn: React.CSSProperties = { width: "100%", background: "transparent", border: "1px solid rgba(70,52,26,.2)", color: "var(--ink-soft)", borderRadius: 15, padding: "13px", fontSize: 14.5, cursor: "pointer" };
+const field: React.CSSProperties = { width: "100%", background: "var(--card)", border: "1px solid rgba(70,52,26,.16)", borderRadius: 14, padding: "13px 15px", fontSize: 15.5, minHeight: 50, color: "var(--ink)", fontFamily: SANS };
 const labelCaps: React.CSSProperties = { fontSize: 11, fontWeight: 600, letterSpacing: 1.4, textTransform: "uppercase", color: "var(--ink-soft)" };
 
 function Segmented({ options, value, onChange, full, small }: {
