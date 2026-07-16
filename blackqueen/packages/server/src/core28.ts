@@ -4,7 +4,7 @@
 
 import {
   State, Action as EngineAction, Card, initRound, applyAction, playerView, botAction,
-  currentActor, nextSeat,
+  currentActor, nextSeat, legalPlay, MIN_OPEN,
 } from "@twentyeight/engine";
 import type { Action28 } from "@twentyeight/protocol";
 import { Member, Outbound, sanitizeAvatar } from "./core.js";
@@ -113,23 +113,51 @@ export class RoomCore28 {
     const a = currentActor(this.game);
     return a >= 0 && this.seatIsBot(a);
   }
+  /** Resolve every consecutive bot turn inline (bounded). Bots therefore NEVER depend on a fragile
+   *  timer chain — one stuck move can't freeze the table. Called after every state-changing entry. */
+  runBots(): void {
+    let guard = 0;
+    while (this.isBotTurn() && guard++ < 80) if (!this.botActOnce()) break;
+  }
   botActOnce(): boolean {
     if (!this.game) return false;
     const seat = currentActor(this.game);
+    if (seat < 0) return false;
+    const before = this.stateVersion;
     const a = botAction(this.game, seat);
-    if (!a) return false;
-    this.applyEngine(a);
-    return true;
+    if (a) this.applyEngine(a);
+    if (this.stateVersion === before) { const fb = this.safeFallback(seat); if (fb) this.applyEngine(fb); } // guarantee progress
+    return this.stateVersion !== before;
   }
-  /** A timed-out actor: fall back to the bot policy so the table never stalls. */
+  /** A guaranteed-legal action for `seat` in the current phase — the anti-stall backstop. */
+  private safeFallback(seat: number): EngineAction | null {
+    const g = this.game!;
+    switch (g.phase) {
+      case "BIDDING": return g.bidder === -1 && seat === (g.dealer + 1) % 4 ? { type: "BID", seat, value: MIN_OPEN } : { type: "PASS", seat };
+      case "CONCEAL": return { type: "SET_TRUMP", seat, card: g.hands[seat]![0]! };
+      case "RAISE": return { type: "DECLINE_RAISE", seat };
+      case "PLAY": {
+        const info = legalPlay(g, seat);
+        if (info.mustReveal) return { type: "REVEAL_TRUMP", seat };
+        if (info.play.length > 0) return { type: "PLAY", seat, card: info.play[0]! };
+        if (info.canReveal) return { type: "REVEAL_TRUMP", seat };
+        return null;
+      }
+      default: return null;
+    }
+  }
+  /** A human whose deadline elapsed: auto-play them, then let any following bots resolve. */
   onTimeout(): void {
-    if (!this.game) return;
-    if (this.game.phase === "DONE" || this.game.phase === "REDEAL") return;
+    if (!this.game || this.game.phase === "DONE" || this.game.phase === "REDEAL") return;
     this.botActOnce();
+    this.runBots();
   }
+  /** Only a HUMAN turn needs a wall-clock deadline — bots resolve inline. */
   nextDeadlineDelay(): number | null {
     if (this.phase !== "IN_GAME" || !this.game) return null;
-    if (this.game.phase === "DONE" || this.game.phase === "REDEAL") return null; // waiting on host / auto-redeal
+    if (this.game.phase === "DONE" || this.game.phase === "REDEAL") return null;
+    const a = currentActor(this.game);
+    if (a < 0 || this.seatIsBot(a)) return null;
     return this.turnTimerMs + this.graceMs;
   }
 
@@ -194,6 +222,7 @@ export class RoomCore28 {
         hostSeat: this.seatOf.get(this.hostAccountId) ?? null,
         seatConnected: this.accountOfSeat.map((acct) => this.members.find((m) => m.accountId === acct)?.connected ?? false),
         endedAt: this.endedAt,
+        turnMs: this.turnTimerMs + this.graceMs, // client countdown budget for the current actor
         round: base,          // the engine's per-seat projection (null in lobby)
         events: this.lastEvents,
       },

@@ -8,7 +8,7 @@ import { Game28 } from "./Game28";
 import { useStore28 } from "./store28";
 import { api28, connect28 } from "./net28";
 
-export const BUILD_TAG = "ui-46-two-games"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-47-28-pacing"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);

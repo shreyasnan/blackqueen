@@ -199,6 +199,7 @@ function Table28() {
         </span>
       </div>
 
+      <TurnTimer view={view} />
       {/* felt + seats */}
       <div style={{ flex: 1, position: "relative", margin: "0 8px" }}>
         <div style={{ position: "absolute", inset: "5% 2%", borderRadius: "50%/42%", background: "linear-gradient(180deg,var(--wood-a),var(--wood-b) 44%,var(--wood-c))", boxShadow: "0 14px 30px rgba(0,0,0,.55), inset 0 2px 1px rgba(255,222,170,.3)" }} />
@@ -219,6 +220,34 @@ function Table28() {
       <div style={{ position: "fixed", bottom: 90, left: 0, right: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, pointerEvents: "none" }}>
         {toasts.map((t) => <div key={t.id} style={{ background: "var(--ink)", color: "var(--ivory)", borderRadius: 8, padding: "8px 14px" }}>{t.text}</div>)}
       </div>
+    </div>
+  );
+}
+
+/** Client-side countdown for whoever's on turn. Resets whenever the actor or state advances; the
+ *  server enforces the real deadline (this is display only, so a lag can't cost you your turn). */
+function TurnTimer({ view }: { view: NonNullable<ReturnType<typeof useStore28.getState>["view"]> }) {
+  const stateVersion = useStore28((s) => s.stateVersion);
+  const r = view.round;
+  const total = Math.round((view.turnMs ?? 45000) / 1000);
+  const [left, setLeft] = useState(total);
+  const mine = r?.actor === view.mySeat;
+  const active = !!r && (r.phase === "BIDDING" || r.phase === "CONCEAL" || r.phase === "RAISE" || r.phase === "PLAY");
+  useEffect(() => {
+    if (!active) return;
+    setLeft(total);
+    const started = Date.now();
+    const t = setInterval(() => setLeft(Math.max(0, total - Math.floor((Date.now() - started) / 1000))), 500);
+    return () => clearInterval(t);
+  }, [stateVersion, r?.actor, active, total]);
+  if (!active) return null;
+  const who = mine ? "Your turn" : `${view.seatNames[r!.actor]?.split(" ")[0] ?? "…"}`;
+  const urgent = left <= 10;
+  return (
+    <div style={{ textAlign: "center", zIndex: 2, marginTop: -2, marginBottom: 2 }}>
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: mine ? "#efe3c4" : "rgba(242,234,214,.7)" }}>
+        {who} · <span style={{ color: urgent ? "#e0724b" : mine ? "var(--gold)" : "rgba(242,234,214,.7)" }}>{left}s</span>
+      </span>
     </div>
   );
 }
@@ -248,14 +277,18 @@ function Center28({ view }: { view: NonNullable<ReturnType<typeof useStore28.get
   const me = view.mySeat ?? 0;
   if (!r) return null;
   if (r.trick.length > 0) {
-    const relPos: Record<number, React.CSSProperties> = { 0: { bottom: 6 }, 1: { right: 6 }, 2: { top: 6 }, 3: { left: 6 } };
+    // each played card sits in front of its player, around the centre (position = attribution)
+    const off: Record<number, [number, number]> = { 0: [0, 60], 1: [70, 0], 2: [0, -60], 3: [-70, 0] };
     return (
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-        {r.trick.map((p) => (
-          <div key={p.seat} style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", ...relPos[(p.seat - me + 4) % 4] }}>
-            <Card28View card={p.card} w={46} />
-          </div>
-        ))}
+        {r.trick.map((p) => {
+          const [dx, dy] = off[(p.seat - me + 4) % 4]!;
+          return (
+            <div key={p.seat} style={{ position: "absolute", left: "50%", top: "45%", transform: `translate(-50%,-50%) translate(${dx}px,${dy}px)` }}>
+              <Card28View card={p.card} w={44} />
+            </div>
+          );
+        })}
       </div>
     );
   }

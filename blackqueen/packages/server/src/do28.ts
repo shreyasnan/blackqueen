@@ -71,6 +71,7 @@ export class Room28DO implements DurableObject {
       case "/start": {
         const r = this.core.startGame(accountId);
         if (!r.ok) return json({ error: r.error }, 400);
+        this.core.runBots(); // resolve any opening bot turns immediately
         this.armAlarm();
         await this.snap();
         return json({ ok: true });
@@ -120,6 +121,7 @@ export class Room28DO implements DurableObject {
     catch { return; }
     if (parsed.playerId !== att.accountId) return; // anti-hijack
     this.core.handleAction(att.accountId, parsed.actionId, parsed);
+    this.core.runBots(); // a human move may hand off to a run of bots — resolve them now
     this.armAlarm();
     if (this.core.phase === "ENDED") await this.ctx.storage.setAlarm(Date.now() + ENDED_TTL_MS);
   }
@@ -133,8 +135,10 @@ export class Room28DO implements DurableObject {
   async alarm(): Promise<void> {
     await this.ready;
     if (this.core.phase === "OPEN" || this.core.phase === "ENDED") { await this.destroy(); return; }
-    if (this.core.isBotTurn()) this.core.botActOnce();
-    else this.core.onTimeout();
+    try {
+      if (this.core.isBotTurn()) this.core.runBots(); // safety net if a bot turn ever lands here
+      else this.core.onTimeout();                     // a human's deadline elapsed
+    } catch { /* never let one bad move freeze the alarm */ }
     this.armAlarm();
     if ((this.core.phase as string) === "ENDED") await this.ctx.storage.setAlarm(Date.now() + ENDED_TTL_MS);
   }

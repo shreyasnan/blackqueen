@@ -27,6 +27,7 @@ export interface View28 {
   mySeat: number | null; hostSeat: number | null;
   seatConnected: boolean[];
   endedAt: number | null;
+  turnMs?: number;
   round: Round28 | null;
   events: { kind: string; [k: string]: unknown }[];
 }
