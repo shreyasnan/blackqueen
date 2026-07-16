@@ -1,11 +1,15 @@
 // The 28 game screens — Home (create/join), Lobby, and Table. Isolated from Black Queen; renders
 // purely from the server view (store28). Uses the shared Real Card Club theme tokens.
-import { useEffect, useState } from "react";
-import { motion } from "motion/react";
+import { useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { useStore28, Card28, Round28 } from "./store28";
 import { api28, connect28, sendAction28, storedRoom28, disconnect28, getRoomId28 } from "./net28";
 import { btn, btnSec } from "./App";
+import { CardFace } from "./Table";
+import { Face } from "./faces";
 import type { AuthState } from "./net";
+
+const card28 = (c: Card28) => c as unknown as Parameters<typeof CardFace>[0]["card"]; // 28 ranks are valid BQ ranks
 
 const GLYPH: Record<string, string> = { C: "♣", D: "♦", H: "♥", S: "♠" };
 const SUIT_WORD: Record<string, string> = { C: "Clubs", D: "Diamonds", H: "Hearts", S: "Spades" };
@@ -27,23 +31,38 @@ export function Game28({ auth, onExit }: { auth: AuthState; onExit: () => void }
   return <Home28 auth={auth} onExit={onExit} />;
 }
 
-function Card28View({ card, w = 64, dim, highlight }: { card: Card28; w?: number; dim?: boolean; highlight?: boolean }) {
-  const color = red(card.suit) ? "#b23324" : "#1c1c1a";
+const SPRING = { type: "spring" as const, stiffness: 380, damping: 26 };
+const REDUCED = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** Ported from Black Queen's TimerRing: a countdown ring around the active avatar + last-15s digits. */
+function TurnRing28({ active, budgetMs, size }: { active: boolean; budgetMs: number; size: number }) {
+  const sv = useStore28((s) => s.stateVersion);
+  const [left, setLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (!active) { setLeft(null); return; }
+    const started = Date.now();
+    const t = setInterval(() => { const l = Math.ceil((budgetMs - (Date.now() - started)) / 1000); setLeft(l <= 15 ? Math.max(0, l) : null); }, 250);
+    return () => clearInterval(t);
+  }, [active, budgetMs, sv]);
+  if (!active) return null;
+  const r = size / 2 - 2; const c = 2 * Math.PI * r; const urgent = left !== null && left <= 5;
   return (
-    <div
-      style={{
-        width: w, height: w * 1.42, position: "relative",
-        backgroundImage: "repeating-linear-gradient(92deg, rgba(120,96,60,.04) 0 1px, transparent 1px 3px), radial-gradient(120% 90% at 50% 0%, #f7f0e2, #e8decb 92%)",
-        border: `${highlight ? 2 : 1}px solid ${highlight ? "var(--gold)" : "rgba(90,70,45,.24)"}`,
-        borderRadius: 9, color, opacity: dim ? 0.5 : 1,
-        boxShadow: highlight ? "0 8px 18px rgba(194,162,74,.5)" : "0 5px 11px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.7)",
-      }}>
-      <div style={{ position: "absolute", top: 4, left: 5, textAlign: "center", lineHeight: 1, fontFamily: SERIF }}>
-        <div style={{ fontSize: w * 0.28, fontWeight: 700 }}>{card.rank}</div>
-        <div style={{ fontSize: w * 0.2 }}>{GLYPH[card.suit]}</div>
-      </div>
-      <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: w * 0.42 }}>{GLYPH[card.suit]}</div>
-    </div>
+    <>
+      {!REDUCED && (
+        <svg key={sv} width={size} height={size} style={{ position: "absolute", top: -4, left: "50%", marginLeft: -size / 2, transform: "rotate(-90deg)", pointerEvents: "none" }}>
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(0,0,0,.32)" strokeWidth={4} />
+          <motion.circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={4} strokeLinecap="round"
+            initial={{ strokeDashoffset: 0, stroke: "#c2a24a" }} animate={{ strokeDashoffset: -c, stroke: ["#c2a24a", "#d9a418", "#e0724b"] }}
+            transition={{ duration: budgetMs / 1000, ease: "linear", times: [0, 0.72, 1] }} strokeDasharray={c} />
+        </svg>
+      )}
+      {left !== null && (
+        <motion.span animate={urgent && !REDUCED ? { scale: [1, 1.25, 1] } : { scale: 1 }} transition={urgent ? { repeat: Infinity, duration: 0.8 } : undefined}
+          style={{ position: "absolute", top: -10, right: -16, background: urgent ? "#c62f12" : "var(--coral)", color: "#fff", fontSize: urgent ? 12.5 : 11, fontWeight: 900, borderRadius: 9, minWidth: 18, padding: "1px 3px", textAlign: "center", boxShadow: "0 2px 5px rgba(0,0,0,.3)" }}>
+          {left}
+        </motion.span>
+      )}
+    </>
   );
 }
 
@@ -173,6 +192,7 @@ function Table28() {
   const view = useStore28((s) => s.view);
   const connection = useStore28((s) => s.connection);
   const toasts = useStore28((s) => s.toasts);
+  const [review, setReview] = useState(false);
   if (!view) return <div style={{ display: "grid", placeItems: "center", height: "100dvh", color: "var(--ivory)", background: "#14150f" }}>Connecting…</div>;
 
   if (view.phase === "ENDED") return <MatchEnd view={view} />;
@@ -202,7 +222,7 @@ function Table28() {
 
       <TurnTimer view={view} />
       {/* felt + seats */}
-      <div style={{ flex: 1, position: "relative", margin: "0 8px" }}>
+      <div onClick={() => view.round?.lastTrick && setReview(true)} style={{ flex: 1, position: "relative", margin: "0 8px", cursor: view.round?.lastTrick ? "pointer" : "default" }}>
         <div style={{ position: "absolute", inset: "5% 2%", borderRadius: "50%/42%", background: "linear-gradient(180deg,var(--wood-a),var(--wood-b) 44%,var(--wood-c))", boxShadow: "0 14px 30px rgba(0,0,0,.55), inset 0 2px 1px rgba(255,222,170,.3)" }} />
         <div style={{ position: "absolute", inset: "7.5% 4%", borderRadius: "50%/42%", background: "radial-gradient(ellipse at 50% 34%, var(--felt-a), var(--felt-b) 52%, var(--felt-c))", boxShadow: "inset 0 8px 30px rgba(0,0,0,.45)" }} />
         {/* center: current trick / status */}
@@ -217,6 +237,7 @@ function Table28() {
 
       {/* controls + your hand */}
       <Controls28 view={view} />
+      {review && <LastTrick28 view={view} onClose={() => setReview(false)} />}
       {connection === "reconnecting" && <div style={{ position: "fixed", top: 0, left: 0, right: 0, background: "var(--coral)", color: "#fff", textAlign: "center", padding: 6 }}>Reconnecting…</div>}
       <div style={{ position: "fixed", bottom: 90, left: 0, right: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, pointerEvents: "none" }}>
         {toasts.map((t) => <div key={t.id} style={{ background: "var(--ink)", color: "var(--ivory)", borderRadius: 8, padding: "8px 14px" }}>{t.text}</div>)}
@@ -255,21 +276,45 @@ function TurnTimer({ view }: { view: NonNullable<ReturnType<typeof useStore28.ge
 
 function Seat28({ view, seat }: { view: NonNullable<ReturnType<typeof useStore28.getState>["view"]>; seat: number }) {
   const r = view.round;
-  const isTurn = r?.actor === seat;
+  const me = view.mySeat ?? 0;
+  const active = !!r && r.actor === seat && (r.phase === "BIDDING" || r.phase === "CONCEAL" || r.phase === "RAISE" || r.phase === "PLAY");
   const isBidder = r?.bidder === seat;
   const team = seat % 2;
-  const name = seat === view.mySeat ? "You" : (view.seatNames[seat]?.split(" ")[0] ?? `Seat ${seat}`);
+  const ring = active ? "#efe3c4" : TEAM_COLORS[team]!;
+  const faceSize = seat === me ? 42 : 34;
+  const ringD = faceSize + 10;
+  const name = seat === me ? "You" : (view.seatNames[seat]?.split(" ")[0] ?? `Seat ${seat}`);
   const count = r?.handCounts[seat] ?? 0;
+  const away = seat !== me && view.seatConnected[seat] === false;
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-      <div style={{ width: 44, height: 44, borderRadius: 22, background: "radial-gradient(circle at 50% 32%,#4a6a58,#2c4636)", border: `2.5px solid ${isTurn ? "#efe3c4" : TEAM_COLORS[team]}`, boxShadow: isTurn ? "0 0 16px rgba(232,214,176,.7)" : "0 4px 9px rgba(0,0,0,.45)", display: "grid", placeItems: "center", fontSize: 20 }}>
-        {view.seatAvatars[seat] === "bot" ? "🤖" : "🂠"}
+    <motion.div animate={{ scale: active ? 1.08 : 1, y: active ? -2 : 0 }} transition={SPRING}
+      style={{ position: "relative", display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+      <AnimatePresence>
+        {active && !REDUCED && (
+          <motion.div initial={{ opacity: 0, y: -6 }} exit={{ opacity: 0 }} animate={{ opacity: 1, y: [0, -6, 0] }} transition={{ y: { repeat: Infinity, duration: 0.9, ease: "easeInOut" } }}
+            style={{ position: "absolute", top: -20, left: "50%", marginLeft: -10, zIndex: 9, width: 0, height: 0, borderLeft: "10px solid transparent", borderRight: "10px solid transparent", borderTop: "13px solid var(--gold)", filter: "drop-shadow(0 2px 4px rgba(0,0,0,.35))" }} />
+        )}
+      </AnimatePresence>
+      {active && seat === me && (
+        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING}
+          style={{ position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", zIndex: 10, whiteSpace: "nowrap", background: "var(--coral)", color: "#fff", fontSize: 9, fontWeight: 900, letterSpacing: 0.6, borderRadius: 8, padding: "1.5px 6px", boxShadow: "0 2px 6px rgba(0,0,0,.3)" }}>
+          YOUR TURN
+        </motion.div>
+      )}
+      <div style={{ position: "relative" }}>
+        <div style={{ width: ringD, height: ringD, borderRadius: "50%", border: `2.5px solid ${ring}`, background: "var(--parchment)", overflow: "hidden", display: "grid", placeItems: "center", boxShadow: active ? "0 0 16px rgba(232,214,176,.6)" : "0 3px 8px rgba(0,0,0,.4)" }}>
+          <Face id={view.seatAvatars[seat] ?? "classic"} size={faceSize} />
+        </div>
+        <TurnRing28 active={active} budgetMs={view.turnMs ?? 45000} size={ringD + 8} />
+        {isBidder && (
+          <span title="bidder" style={{ position: "absolute", right: -3, bottom: -1, width: 18, height: 18, borderRadius: 9, background: "var(--coral)", color: "#fff", fontSize: 11, fontWeight: 900, lineHeight: "18px", textAlign: "center", boxShadow: "0 2px 5px rgba(0,0,0,.35)" }}>B</span>
+        )}
       </div>
-      <div style={{ background: "rgba(16,32,24,.6)", borderRadius: 9, padding: "2px 9px", fontSize: 10.5, color: "#ecdfbd", whiteSpace: "nowrap" }}>
-        {name}{isBidder ? " · B" : ""} · {count}
+      <div style={{ background: "rgba(16,32,24,.62)", borderRadius: 10, padding: "2px 10px", maxWidth: "40vw", boxShadow: "0 2px 6px rgba(0,0,0,.28)", textAlign: "center" }}>
+        <div style={{ fontWeight: 700, fontSize: 12, color: team === 0 ? "#ffe6a6" : "#bfeede", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 }}>{name}</div>
+        <div style={{ fontSize: 10, color: "rgba(255,253,247,.8)", lineHeight: 1.25 }}>{away ? <b style={{ color: "#ff9b8a" }}>💤 away</b> : `${count} cards`}</div>
       </div>
-      {isTurn && <div style={{ fontSize: 8.5, fontWeight: 800, color: "#efe3c4", letterSpacing: 0.5 }}>▲ TURN</div>}
-    </div>
+    </motion.div>
   );
 }
 
@@ -296,9 +341,9 @@ function Center28({ view }: { view: NonNullable<ReturnType<typeof useStore28.get
         {shown.map((p) => {
           const [dx, dy] = off[(p.seat - me + 4) % 4]!;
           return (
-            <motion.div key={p.seat} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: p.win ? 1.12 : 1 }}
-              style={{ position: "absolute", left: "50%", top: "45%", transform: `translate(-50%,-50%) translate(${dx}px,${dy}px)`, borderRadius: 9, boxShadow: p.win ? "0 0 0 3px var(--gold), 0 6px 14px rgba(0,0,0,.5)" : undefined }}>
-              <Card28View card={p.card} w={44} />
+            <motion.div key={p.seat} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: p.win ? 1.14 : 1 }}
+              style={{ position: "absolute", left: "50%", top: "45%", transform: `translate(-50%,-50%) translate(${dx}px,${dy}px)`, borderRadius: 11, boxShadow: p.win ? "0 0 0 3px var(--gold), 0 6px 16px rgba(0,0,0,.5)" : undefined }}>
+              <CardFace card={card28(p.card)} width={46} deck="28" single />
             </motion.div>
           );
         })}
@@ -402,22 +447,59 @@ function Hand28({ view }: { view: NonNullable<ReturnType<typeof useStore28.getSt
     <>
       {conceal && <div style={{ textAlign: "center", color: "var(--gold)", fontSize: 12.5, marginBottom: 6 }}>Tap or swipe up a card to set it face-down as trump (its suit becomes trump).</div>}
       {play && r.actor === me && <div style={{ textAlign: "center", color: "rgba(242,234,214,.7)", fontSize: 11.5, marginBottom: 4 }}>tap or swipe a card up to play</div>}
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-end", gap: 2, touchAction: "pan-x" }}>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-end", gap: 2, touchAction: "pan-x", minHeight: w * 1.42 + 14 }}>
         {r.hand.map((c, i) => {
           const actionable = conceal || (play && isLegal(c));
+          const illegal = play && !isLegal(c);
           return (
-            <motion.div key={ck(c) + i} drag={actionable ? "y" : false} dragSnapToOrigin dragElastic={0.5} dragConstraints={{ top: -120, bottom: 0 }}
+            <motion.div key={ck(c)} drag={actionable ? "y" : false} dragSnapToOrigin dragElastic={0.5} dragConstraints={{ top: -120, bottom: 0 }}
               whileDrag={{ scale: 1.12, zIndex: 60 }}
               onDragEnd={(_e, info) => { if (actionable && info.offset.y < -55) onCard(c); }}
               onClick={() => { if (actionable) onCard(c); }}
-              animate={{ y: actionable ? -8 : 0 }}
-              style={{ marginLeft: i === 0 ? 0 : -Math.round(w * 0.32), zIndex: i, cursor: actionable ? "pointer" : "default", touchAction: actionable ? "none" : "auto" }}>
-              <Card28View card={c} w={w} dim={play && !isLegal(c)} highlight={actionable} />
+              initial={{ y: 70, opacity: 0, rotate: -4 }}
+              animate={{ y: actionable ? -8 : 0, opacity: 1, rotate: 0 }}
+              transition={{ delay: Math.min(i * 0.045, 0.5), type: "spring", stiffness: 320, damping: 26 }}
+              style={{ marginLeft: i === 0 ? 0 : -Math.round(w * 0.32), zIndex: i, cursor: actionable ? "pointer" : "default", touchAction: actionable ? "none" : "auto", opacity: illegal ? 0.68 : 1, filter: illegal ? "saturate(0.8) brightness(0.96)" : undefined }}>
+              <CardFace card={card28(c)} width={w} highlight={actionable} single />
             </motion.div>
           );
         })}
       </div>
     </>
+  );
+}
+
+function LastTrick28({ view, onClose }: { view: NonNullable<ReturnType<typeof useStore28.getState>["view"]>; onClose: () => void }) {
+  const lt = view.round?.lastTrick;
+  const me = view.mySeat ?? 0;
+  if (!lt) return null;
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 55, display: "grid", placeItems: "center", background: "rgba(10,14,10,.62)", cursor: "pointer" }}>
+      <motion.div initial={{ scale: 0.85, y: 14 }} animate={{ scale: 1, y: 0 }} transition={SPRING} onClick={(e) => e.stopPropagation()}
+        style={{ background: "var(--parchment)", border: "2.5px solid var(--gold)", borderRadius: 14, padding: "16px 20px", textAlign: "center", boxShadow: "0 14px 44px rgba(0,0,0,.5)", maxWidth: 460 }}>
+        <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 1.2, color: "var(--ink-soft)" }}>LAST TRICK</div>
+        <div style={{ display: "flex", gap: 12, justifyContent: "center", margin: "12px 0", flexWrap: "wrap" }}>
+          {lt.plays.map((p, i) => {
+            const win = p.seat === lt.winner;
+            return (
+              <div key={i} style={{ textAlign: "center" }}>
+                <div style={{ borderRadius: 11, boxShadow: win ? "0 0 0 3px var(--gold)" : undefined, transform: win ? "scale(1.06)" : "none", display: "inline-block" }}>
+                  <CardFace card={card28(p.card)} small deck="28" single />
+                </div>
+                <div style={{ fontSize: 11.5, marginTop: 4, fontWeight: 700, color: win ? "var(--gold)" : "var(--ink)" }}>
+                  {p.seat === me ? "You" : (view.seatNames[p.seat]?.split(" ")[0] ?? "Bot")}{win ? " ✓" : ""}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 13.5, color: "var(--ink)" }}>
+          <b>{lt.winner === me ? "You" : (view.seatNames[lt.winner]?.split(" ")[0] ?? "Bot")}</b> took it{lt.points > 0 ? <> — <b style={{ color: "var(--gold)" }}>+{lt.points}</b></> : " (no points)"}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 6 }}>tap anywhere to close</div>
+      </motion.div>
+    </motion.div>
   );
 }
 
