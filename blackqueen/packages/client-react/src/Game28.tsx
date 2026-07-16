@@ -1,6 +1,7 @@
 // The 28 game screens — Home (create/join), Lobby, and Table. Isolated from Black Queen; renders
 // purely from the server view (store28). Uses the shared Real Card Club theme tokens.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { useStore28, Card28, Round28 } from "./store28";
 import { api28, connect28, sendAction28, storedRoom28, disconnect28, getRoomId28 } from "./net28";
 import { btn, btnSec } from "./App";
@@ -26,15 +27,15 @@ export function Game28({ auth, onExit }: { auth: AuthState; onExit: () => void }
   return <Home28 auth={auth} onExit={onExit} />;
 }
 
-function Card28View({ card, w = 64, dim, highlight, onClick }: { card: Card28; w?: number; dim?: boolean; highlight?: boolean; onClick?: () => void }) {
+function Card28View({ card, w = 64, dim, highlight }: { card: Card28; w?: number; dim?: boolean; highlight?: boolean }) {
   const color = red(card.suit) ? "#b23324" : "#1c1c1a";
   return (
-    <button onClick={onClick} disabled={!onClick}
+    <div
       style={{
-        width: w, height: w * 1.42, position: "relative", cursor: onClick ? "pointer" : "default",
+        width: w, height: w * 1.42, position: "relative",
         backgroundImage: "repeating-linear-gradient(92deg, rgba(120,96,60,.04) 0 1px, transparent 1px 3px), radial-gradient(120% 90% at 50% 0%, #f7f0e2, #e8decb 92%)",
         border: `${highlight ? 2 : 1}px solid ${highlight ? "var(--gold)" : "rgba(90,70,45,.24)"}`,
-        borderRadius: 9, color, opacity: dim ? 0.5 : 1, padding: 0,
+        borderRadius: 9, color, opacity: dim ? 0.5 : 1,
         boxShadow: highlight ? "0 8px 18px rgba(194,162,74,.5)" : "0 5px 11px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.7)",
       }}>
       <div style={{ position: "absolute", top: 4, left: 5, textAlign: "center", lineHeight: 1, fontFamily: SERIF }}>
@@ -42,7 +43,7 @@ function Card28View({ card, w = 64, dim, highlight, onClick }: { card: Card28; w
         <div style={{ fontSize: w * 0.2 }}>{GLYPH[card.suit]}</div>
       </div>
       <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: w * 0.42 }}>{GLYPH[card.suit]}</div>
-    </button>
+    </div>
   );
 }
 
@@ -282,14 +283,23 @@ function Center28({ view }: { view: NonNullable<ReturnType<typeof useStore28.get
     : (r.lastTrick ? r.lastTrick.plays.map((p) => ({ seat: p.seat, card: p.card, win: p.seat === r.lastTrick!.winner })) : []);
   if (shown.length > 0) {
     const off: Record<number, [number, number]> = { 0: [0, 60], 1: [70, 0], 2: [0, -60], 3: [-70, 0] };
+    const done = r.trick.length === 0 && r.lastTrick; // showing the just-finished trick
+    const winName = done ? (r.lastTrick!.winner === me ? "You take" : `${view.seatNames[r.lastTrick!.winner]?.split(" ")[0] ?? "Bot"} takes`) : "";
     return (
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        {done && (
+          <motion.div initial={{ opacity: 0, y: 6, scale: 0.85 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+            style={{ position: "absolute", left: "50%", top: "20%", transform: "translateX(-50%)", background: "var(--gold)", color: "#1c1c1a", fontWeight: 800, borderRadius: 20, padding: "5px 15px", fontSize: 13.5, whiteSpace: "nowrap", boxShadow: "0 5px 14px rgba(0,0,0,.45)" }}>
+            {winName} it{r.lastTrick!.points > 0 ? ` · +${r.lastTrick!.points}` : ""}
+          </motion.div>
+        )}
         {shown.map((p) => {
           const [dx, dy] = off[(p.seat - me + 4) % 4]!;
           return (
-            <div key={p.seat} style={{ position: "absolute", left: "50%", top: "45%", transform: `translate(-50%,-50%) translate(${dx}px,${dy}px)`, borderRadius: 9, boxShadow: p.win ? "0 0 0 3px var(--gold), 0 6px 14px rgba(0,0,0,.5)" : undefined }}>
+            <motion.div key={p.seat} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: p.win ? 1.12 : 1 }}
+              style={{ position: "absolute", left: "50%", top: "45%", transform: `translate(-50%,-50%) translate(${dx}px,${dy}px)`, borderRadius: 9, boxShadow: p.win ? "0 0 0 3px var(--gold), 0 6px 14px rgba(0,0,0,.5)" : undefined }}>
               <Card28View card={p.card} w={44} />
-            </div>
+            </motion.div>
           );
         })}
       </div>
@@ -390,14 +400,20 @@ function Hand28({ view }: { view: NonNullable<ReturnType<typeof useStore28.getSt
   const w = Math.min(62, Math.max(42, Math.floor((typeof innerWidth !== "undefined" ? innerWidth : 400) / (n * 0.72 + 1))));
   return (
     <>
-      {conceal && <div style={{ textAlign: "center", color: "var(--gold)", fontSize: 12.5, marginBottom: 6 }}>Tap a card to set it face-down as trump (its suit becomes trump).</div>}
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-end", gap: 2 }}>
+      {conceal && <div style={{ textAlign: "center", color: "var(--gold)", fontSize: 12.5, marginBottom: 6 }}>Tap or swipe up a card to set it face-down as trump (its suit becomes trump).</div>}
+      {play && r.actor === me && <div style={{ textAlign: "center", color: "rgba(242,234,214,.7)", fontSize: 11.5, marginBottom: 4 }}>tap or swipe a card up to play</div>}
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-end", gap: 2, touchAction: "pan-x" }}>
         {r.hand.map((c, i) => {
           const actionable = conceal || (play && isLegal(c));
           return (
-            <div key={ck(c) + i} style={{ marginLeft: i === 0 ? 0 : -Math.round(w * 0.32), transform: actionable ? "translateY(-6px)" : "none", zIndex: i }}>
-              <Card28View card={c} w={w} dim={play && !isLegal(c)} highlight={actionable} onClick={actionable ? () => onCard(c) : undefined} />
-            </div>
+            <motion.div key={ck(c) + i} drag={actionable ? "y" : false} dragSnapToOrigin dragElastic={0.5} dragConstraints={{ top: -120, bottom: 0 }}
+              whileDrag={{ scale: 1.12, zIndex: 60 }}
+              onDragEnd={(_e, info) => { if (actionable && info.offset.y < -55) onCard(c); }}
+              onClick={() => { if (actionable) onCard(c); }}
+              animate={{ y: actionable ? -8 : 0 }}
+              style={{ marginLeft: i === 0 ? 0 : -Math.round(w * 0.32), zIndex: i, cursor: actionable ? "pointer" : "default", touchAction: actionable ? "none" : "auto" }}>
+              <Card28View card={c} w={w} dim={play && !isLegal(c)} highlight={actionable} />
+            </motion.div>
           );
         })}
       </div>
