@@ -8,7 +8,8 @@
     "paths": {
       "@blackqueen/engine": ["./packages/engine/src/index.ts"],
       "@blackqueen/protocol": ["./packages/protocol/src/index.ts"],
-      "@twentyeight/engine": ["./packages/engine28/src/index.ts"]
+      "@twentyeight/engine": ["./packages/engine28/src/index.ts"],
+      "@twentyeight/protocol": ["./packages/protocol28/src/index.ts"]
     }
   },
   "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts"],

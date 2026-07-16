@@ -3,6 +3,7 @@
 /// <reference types="@cloudflare/workers-types" />
 import { Env } from "./do.js";
 export { RoomDO } from "./do.js";
+export { Room28DO } from "./do28.js"; // isolated 28 room class (separate DO namespace)
 
 interface WorkerEnv extends Env {
   CLERK_JWKS_URL?: string; // https://<instance>.clerk.accounts.dev/.well-known/jwks.json
@@ -10,6 +11,7 @@ interface WorkerEnv extends Env {
   CLERK_AUTHORIZED_PARTY?: string; // optional: expected `azp` claim (your app origin), if Clerk sets it
   GUEST_SECRET?: string; // HMAC key for guest tokens — set via `wrangler secret put GUEST_SECRET`
   ASSETS?: Fetcher;
+  ROOMS28?: DurableObjectNamespace; // 28 rooms (isolated from ROOMS)
 }
 
 // ---- Guest identity (PLATFORM_SPEC §1.1 amendment: hybrid — accounts OR ephemeral guests) ----
@@ -159,6 +161,17 @@ function toDO(env: WorkerEnv, roomId: string, path: string, req: Request, id: Id
   return stub.fetch(new Request(`https://do${path}`, { method: req.method, headers, body: req.body }));
 }
 
+/** Same forwarding, but to the isolated 28 room namespace. */
+function toDO28(env: WorkerEnv, roomId: string, path: string, req: Request, id: Identity, nameOverride?: string, avatar?: string): Promise<Response> {
+  const stub = env.ROOMS28!.get(env.ROOMS28!.idFromString(roomId));
+  const headers = new Headers(req.headers);
+  headers.set("x-account-id", id.accountId);
+  const name = (nameOverride ?? id.displayName).slice(0, 20).replace(/[\p{Cc}\p{Cf}]/gu, "") || "Player";
+  headers.set("x-display-name", encodeURIComponent(name));
+  if (avatar) headers.set("x-avatar", encodeURIComponent(avatar.slice(0, 8)));
+  return stub.fetch(new Request(`https://do${path}`, { method: req.method, headers, body: req.body }));
+}
+
 export default {
   async fetch(req: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(req.url);
@@ -198,6 +211,24 @@ export default {
       }
       const m = url.pathname.match(/^\/api\/rooms\/([0-9a-f]+)\/(ws|state|start|addbot|removebot|leave|config)$/);
       if (m) return toDO(env, m[1]!, `/${m[2]}`, req, id);
+
+      // ---- isolated 28 routes (separate DO namespace; Black Queen routing above is untouched) ----
+      if (env.ROOMS28) {
+        if (url.pathname === "/api/28/rooms" && req.method === "POST") {
+          const body = await req.clone().json().catch(() => null) as { displayName?: string; avatar?: string } | null;
+          const roomId = env.ROOMS28.newUniqueId().toString();
+          return toDO28(env, roomId, "/create", req, id, body?.displayName, body?.avatar);
+        }
+        if (url.pathname === "/api/28/rooms/join" && req.method === "POST") {
+          const body = await req.clone().json().catch(() => null) as { code?: string; displayName?: string; avatar?: string } | null;
+          const code = body?.code?.toUpperCase();
+          const roomId = code ? await env.CODES.get(`c28:${code}`) : null;
+          if (!roomId) return new Response(JSON.stringify({ error: "invalid or expired code" }), { status: 404 });
+          return toDO28(env, roomId, "/join", req, id, body?.displayName, body?.avatar);
+        }
+        const m28 = url.pathname.match(/^\/api\/28\/rooms\/([0-9a-f]+)\/(ws|state|start|addbot|removebot|leave|config)$/);
+        if (m28) return toDO28(env, m28[1]!, `/${m28[2]}`, req, id);
+      }
       return new Response("not found", { status: 404 });
     }
 

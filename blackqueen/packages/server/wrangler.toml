@@ -10,9 +10,17 @@ binding = "ASSETS"
 name = "ROOMS"
 class_name = "RoomDO"
 
+[[durable_objects.bindings]]
+name = "ROOMS28"
+class_name = "Room28DO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Room28DO"]
 
 [[kv_namespaces]]
 binding = "CODES"

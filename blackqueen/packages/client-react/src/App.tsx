@@ -4,8 +4,11 @@ import { useStore } from "./store";
 import { initAuth, mountClerkSignIn, devLogin, guestLogin, signOut, api, connect, storedRoom, AuthState } from "./net";
 import { Face, FACE_IDS } from "./faces";
 import { Table } from "./Table";
+import { Game28 } from "./Game28";
+import { useStore28 } from "./store28";
+import { api28, connect28 } from "./net28";
 
-export const BUILD_TAG = "ui-45-clerk-clean"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-46-two-games"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -17,13 +20,33 @@ export function App() {
   const [pendingJoin, setPendingJoin] = useState<string | null>(
     () => new URLSearchParams(location.search).get("join")?.toUpperCase() ?? null,
   );
+  const [pendingJoin28, setPendingJoin28] = useState<string | null>(
+    () => new URLSearchParams(location.search).get("join28")?.toUpperCase() ?? null,
+  );
 
   useEffect(() => {
     initAuth((a) => {
       setAuthed(a);
-      if (a) setScreen("home");
+      if (a) setScreen(pendingJoin ? "home" : pendingJoin28 ? "g28" : "choose");
     });
-  }, [setScreen]);
+  }, [setScreen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 28 invite link (/?join28=CODE): auto-join the isolated 28 room after auth.
+  useEffect(() => {
+    if (!authed || !pendingJoin28) return;
+    const code = pendingJoin28;
+    setPendingJoin28(null);
+    history.replaceState(null, "", location.pathname);
+    setScreen("g28");
+    const p = loadProfile(authed);
+    api28<{ roomId: string; members?: any[]; host?: string; reconnect?: boolean }>("/api/28/rooms/join", { code, displayName: p.nick, avatar: p.face })
+      .then((r) => {
+        if (r.reconnect) { connect28(r.roomId); return; }
+        useStore28.getState().setRoomInfo({ roomId: r.roomId, code: null, members: r.members ?? [], host: r.host ?? "" });
+        useStore28.getState().setScreen("lobby");
+      })
+      .catch((e) => pushToast(e instanceof Error ? e.message : "That 28 invite has expired"));
+  }, [authed, pendingJoin28, pushToast, setScreen]);
 
   // once authenticated with a pending invite: join automatically, using the saved identity.
   // If the game already started and this account is already a member, we reconnect straight to the table.
@@ -45,7 +68,7 @@ export function App() {
   // reconnect-on-load: if this browser was in a live game and there's no fresh invite to act on,
   // reconnect straight to that room by id (no code needed). If the room's gone, net gives up → home.
   useEffect(() => {
-    if (!authed || pendingJoin) return;
+    if (!authed || pendingJoin || pendingJoin28) return;
     const rid = storedRoom();
     if (rid) connect(rid);
     // run once auth resolves; connect + ViewUpdate flips the screen to the table
@@ -53,6 +76,8 @@ export function App() {
   }, [authed]);
 
   if (screen === "table") return <Table />;
+  if (authed && screen === "g28") return <Game28 auth={authed} onExit={() => setScreen("choose")} />;
+  if (authed && screen === "choose") return <GamePicker name={authed.name} onPick={(g) => { if (g === "bq") setScreen("home"); else { useStore28.getState().reset(); setScreen("g28"); } }} />;
   return (
     <div style={{ maxWidth: 440, margin: "0 auto", padding: "clamp(16px,4vw,26px)", fontFamily: SANS }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, margin: "8px 0 20px" }}>
@@ -65,8 +90,8 @@ export function App() {
       {screen === "auth" && (
         <p style={{ color: "var(--ink-soft)", marginBottom: 18, fontSize: 14.5 }}>Hidden teams. Trust no one.</p>
       )}
-      {screen === "auth" && <AuthScreen invited={pendingJoin !== null} onAuthed={(a) => { setAuthed(a); setScreen("home"); }} />}
-      {screen === "home" && authed && <Home auth={authed} />}
+      {screen === "auth" && <AuthScreen invited={pendingJoin !== null} onAuthed={(a) => { setAuthed(a); setScreen("choose"); }} />}
+      {screen === "home" && authed && <Home auth={authed} onExit={() => setScreen("choose")} />}
       {screen === "lobby" && authed && <Lobby auth={authed} />}
     </div>
   );
@@ -140,7 +165,7 @@ function saveProfile(face: string, nick: string): void {
   window.Clerk?.user?.update?.({ unsafeMetadata: { ...window.Clerk.user.unsafeMetadata, bqFace: face, bqNick: nick } }).catch(() => {});
 }
 
-function Home({ auth }: { auth: AuthState }) {
+function Home({ auth, onExit }: { auth: AuthState; onExit?: () => void }) {
   const setScreen = useStore((s) => s.setScreen);
   const setRoomInfo = useStore((s) => s.setRoomInfo);
   const pushToast = useStore((s) => s.pushToast);
@@ -175,7 +200,7 @@ function Home({ auth }: { auth: AuthState }) {
   return (
     <div style={{ fontFamily: SANS }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, fontSize: 13.5, color: "var(--ink-soft)" }}>
-        <span>Signed in as <b style={{ color: "var(--ink)" }}>{auth.name}</b></span>
+        {onExit ? <button onClick={onExit} style={{ background: "transparent", border: 0, color: "var(--ink-soft)", cursor: "pointer", fontSize: 13.5 }}>← Games</button> : <span>Signed in as <b style={{ color: "var(--ink)" }}>{auth.name}</b></span>}
         <button onClick={signOut} style={{ background: "transparent", border: 0, color: "var(--ink-soft)", cursor: "pointer", fontSize: 13.5, textDecoration: "underline", padding: 4 }}>Sign out</button>
       </div>
 
@@ -416,6 +441,31 @@ function Lobby({ auth }: { auth: AuthState }) {
 }
 
 // Primary = forest green (commit); secondary = neutral charcoal; both lit from above (top highlight, AO base).
+/** After auth: choose which game to play. Extensible — add a card per game. */
+function GamePicker({ name, onPick }: { name: string; onPick: (g: "bq" | "28") => void }) {
+  const card: React.CSSProperties = { ...surfaceCard, padding: 20, cursor: "pointer", textAlign: "left", width: "100%", display: "block" };
+  return (
+    <div style={{ maxWidth: 440, margin: "0 auto", padding: "clamp(16px,4vw,26px)", fontFamily: SANS }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, fontSize: 13.5, color: "var(--ink-soft)" }}>
+        <span>Signed in as <b style={{ color: "var(--ink)" }}>{name}</b></span>
+        <button onClick={signOut} style={{ background: "transparent", border: 0, color: "var(--ink-soft)", cursor: "pointer", fontSize: 13.5, textDecoration: "underline" }}>Sign out</button>
+      </div>
+      <h1 style={{ fontFamily: SERIF, fontSize: "clamp(24px,6.5vw,30px)", fontWeight: 700, color: "var(--ink)", margin: "0 0 4px" }}>Choose a game</h1>
+      <p style={{ color: "var(--ink-soft)", fontSize: 14, margin: "0 0 20px" }}>Pick a table to create or join.</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <button style={card} onClick={() => onPick("bq")}>
+          <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 700, color: "var(--ink)" }}><span style={{ color: "#1c2a20" }}>Black</span> <span style={{ color: "var(--ink)" }}>Queen</span> <span style={{ fontSize: 18 }}>♠</span></div>
+          <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 4 }}>Hidden teams, secret partners. 4–10 players.</div>
+        </button>
+        <button style={card} onClick={() => onPick("28")}>
+          <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 700, color: "var(--ink)" }}>28</div>
+          <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 4 }}>Fixed partners, a concealed trump. 4 players.</div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export const btn: React.CSSProperties = { background: "linear-gradient(180deg,#33543a,#22412a)", color: "var(--ivory)", border: 0, borderRadius: 8, padding: "10px 16px", fontWeight: 700, cursor: "pointer", boxShadow: "inset 0 1px 0 rgba(255,255,255,.12), 0 3px 8px rgba(0,0,0,.28)" };
 export const btnSec: React.CSSProperties = { background: "var(--charcoal-2)", color: "var(--ivory)", border: 0, borderRadius: 8, padding: "10px 16px", cursor: "pointer", boxShadow: "inset 0 1px 0 rgba(255,255,255,.07)" };
 export const inp: React.CSSProperties = { background: "var(--card)", border: "1px solid var(--shadow)", borderRadius: 8, padding: "10px" };

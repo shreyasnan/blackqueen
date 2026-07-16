@@ -1,7 +1,7 @@
 {
   "name": "blackqueen",
   "private": true,
-  "workspaces": ["packages/engine", "packages/engine28", "packages/protocol", "packages/server", "packages/client"],
+  "workspaces": ["packages/engine", "packages/engine28", "packages/protocol", "packages/protocol28", "packages/server", "packages/client"],
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc -b packages/engine packages/protocol packages/server"
