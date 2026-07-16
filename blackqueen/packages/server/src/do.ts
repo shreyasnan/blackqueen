@@ -66,12 +66,13 @@ export class RoomDO implements DurableObject {
         this.core.create(accountId, displayName, cfg, avatar);
         await this.env.CODES.put(`code:${this.core.inviteCode}`, this.ctx.id.toString(), { expirationTtl: 24 * 3600 });
         await this.ctx.storage.setAlarm(Date.now() + LOBBY_TTL_MS);
+        await this.snapLobby(); // an OPEN lobby must survive DO eviction (else the invite link 404s)
         return json({ roomId: this.ctx.id.toString(), code: this.core.inviteCode, members: this.core.members });
       }
       case "/join": {
         const { code } = await req.json() as { code: string };
         const r = this.core.join(code, accountId, displayName, avatar);
-        if (r.ok) return json({ roomId: this.ctx.id.toString(), members: this.core.members, host: this.core.hostAccountId, phase: this.core.phase });
+        if (r.ok) { await this.snapLobby(); return json({ roomId: this.ctx.id.toString(), members: this.core.members, host: this.core.hostAccountId, phase: this.core.phase }); }
         // join failed — but the code may still resolve to a running game. A returning MEMBER reconnects
         // straight to their seat; a stranger just learns the game already started.
         if (code === this.core.inviteCode) {
@@ -93,17 +94,20 @@ export class RoomDO implements DurableObject {
         const body = await req.json().catch(() => ({})) as { deckCount?: number; calledCount?: number | null; handSize?: number | null };
         const r = this.core.setConfig(accountId, body);
         if (!r.ok) return json({ error: r.error }, 400);
+        await this.snapLobby();
         // Lobby members see the new rules on their next /state poll (no live sockets before START).
         return json({ deckCount: this.core.config.deckCount, calledCount: this.core.config.calledCount ?? null, handSize: this.core.config.handSize ?? null });
       }
       case "/addbot": {
         const r = this.core.addBot(accountId);
         if (!r.ok) return json({ error: r.error }, 400);
+        await this.snapLobby();
         return json({ members: this.core.members });
       }
       case "/removebot": {
         const r = this.core.removeBot(accountId);
         if (!r.ok) return json({ error: "no bot to remove" }, 400);
+        await this.snapLobby();
         return json({ members: this.core.members });
       }
       case "/leave": {
@@ -115,6 +119,7 @@ export class RoomDO implements DurableObject {
           try { if ((ws.deserializeAttachment() as Attachment)?.accountId === accountId) ws.close(1000, "left"); } catch { /* ignore */ }
         }
         this.core.pushViews();
+        await this.snapLobby(); // membership/host change must survive eviction
         return json({ ok: true });
       }
       case "/state":
@@ -205,6 +210,13 @@ export class RoomDO implements DurableObject {
   }
 
   private static BOT_BEAT_MS = 800;
+
+  /** Persist the room snapshot after a lobby mutation. In-game actions snapshot via afterAccepted;
+   *  lobby ops (create/join/config/bots/leave) did not, so an idle OPEN room lost to DO eviction came
+   *  back empty and its invite link 404'd. Writing snap:latest lets restore() rebuild the lobby. */
+  private async snapLobby(): Promise<void> {
+    await this.ctx.storage.put("snap:latest", this.core.serialize());
+  }
 
   private async destroyRoom(): Promise<void> {
     await this.env.CODES.delete(`code:${this.core.inviteCode}`);
