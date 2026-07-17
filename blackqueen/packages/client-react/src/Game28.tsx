@@ -578,29 +578,25 @@ function TrickOnFelt28({ view: v }: { view: View28 }) {
   const r = v.round;
   const [linger, setLinger] = useState<{ plays: { seat: number; card: Card28 }[]; winner: number; points: number } | null>(null);
   const lastTrick = r?.lastTrick ?? null;
-  const trickLen = r?.trick.length ?? 0;
-  const completedRef = useRef(0);
-  // detect a just-completed trick: trick emptied AND a lastTrick exists we haven't lingered yet
+  // A completed trick is identified purely by its card signature. Keying the linger effect ONLY on this
+  // (never on the live trick length) is what lets each new trick's cards land one-by-one underneath —
+  // an earlier version also depended on trick length, which cancelled the clear-timer and froze the felt.
   const lastSig = lastTrick ? lastTrick.plays.map((p) => ck(p.card)).join(",") : "";
   const prevSig = useRef("");
   useEffect(() => {
-    if (!lastTrick) return;
-    if (lastSig && lastSig !== prevSig.current && trickLen === 0) {
-      prevSig.current = lastSig;
-      completedRef.current++;
-      setLinger({ plays: lastTrick.plays, winner: lastTrick.winner, points: lastTrick.points });
-      const t = setTimeout(() => {
-        setLinger(null);
-        if (!REDUCED) {
-          const from = centerOf(trickEl);
-          const to = centerOf(seatEls.get(lastTrick.winner) ?? null);
-          useStore28.getState().addFlights(lastTrick.plays.map((p, i) => ({ x0: from.x + (i - lastTrick.plays.length / 2) * 26, y0: from.y, x1: to.x, y1: to.y, card: p.card, delay: i * 60 })));
-        }
-      }, 1050);
-      return () => clearTimeout(t);
-    }
-    if (lastSig) prevSig.current = lastSig;
-  }, [lastSig, trickLen]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!lastTrick || !lastSig || lastSig === prevSig.current) return;
+    prevSig.current = lastSig;
+    setLinger({ plays: lastTrick.plays, winner: lastTrick.winner, points: lastTrick.points });
+    const t = setTimeout(() => {
+      setLinger(null);
+      if (!REDUCED) {
+        const from = centerOf(trickEl);
+        const to = centerOf(seatEls.get(lastTrick.winner) ?? null);
+        useStore28.getState().addFlights(lastTrick.plays.map((p, i) => ({ x0: from.x + (i - lastTrick.plays.length / 2) * 26, y0: from.y, x1: to.x, y1: to.y, card: p.card, delay: i * 60 })));
+      }
+    }, 1050);
+    return () => clearTimeout(t);
+  }, [lastSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const me = v.mySeat ?? 0;
   const rel = (seat: number) => (seat - me + 4) % 4;

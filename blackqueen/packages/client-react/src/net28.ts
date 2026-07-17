@@ -40,25 +40,38 @@ let viewQueue: { view: any; sv: number }[] = [];
 let paceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastEnq = 0;
 function clearPacing(): void { if (paceTimer) { clearTimeout(paceTimer); paceTimer = null; } viewQueue = []; lastEnq = 0; }
+
+/** Rate-limited pump: applies at most one frame per PACE_MS so a burst of bot moves plays out
+ *  one-by-one (the server ships them all instantly). The FIRST frame after an idle gap applies
+ *  immediately for responsiveness; the moment a frame is "your turn" or a deal ends, we stop
+ *  gating so the human is never made to wait. */
 function enqueueView(view: any, sv: number): void {
-  if (!roomId) return; // left the table — ignore any straggler frame so it can't resurrect the game-over screen
+  if (!roomId) return; // left the table — ignore stragglers so they can't resurrect the game-over screen
   if (sv <= lastEnq) return;
   lastEnq = sv;
   viewQueue.push({ view, sv });
-  if (!paceTimer) applyNextView();
+  pump();
 }
-function applyNextView(): void {
-  paceTimer = null;
-  if (!roomId) { viewQueue = []; return; } // left mid-pace — drop the rest
-  const item = viewQueue.shift();
-  if (!item) return;
+function apply(item: { view: any; sv: number }): void {
   stateVersion = item.sv;
   useStore28.getState().setView(item.view, item.sv);
-  const v = item.view;
+}
+function isFast(v: any): boolean {
   const mine = v.round && v.round.actor === v.mySeat;
   const terminal = v.phase !== "IN_GAME" || (v.round && v.round.phase === "DONE");
-  if (mine || terminal) { viewQueue = []; return; } // it's your move (or the deal ended) — no waiting
-  if (viewQueue.length) paceTimer = setTimeout(applyNextView, PACE_MS);
+  return !!(mine || terminal);
+}
+function pump(): void {
+  if (paceTimer) return;            // a frame is already on the clock — new arrivals just wait in the queue
+  if (!roomId) { viewQueue = []; return; }
+  const item = viewQueue.shift();
+  if (!item) return;
+  apply(item);
+  if (isFast(item.view)) {          // your turn / deal end: don't gate — surface the freshest state at once
+    if (viewQueue.length) { const latest = viewQueue.pop()!; viewQueue = []; apply(latest); }
+    return;
+  }
+  paceTimer = setTimeout(() => { paceTimer = null; pump(); }, PACE_MS); // gate the NEXT frame
 }
 
 export const getRoomId28 = () => roomId;
