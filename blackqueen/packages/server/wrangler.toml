@@ -14,6 +14,10 @@ class_name = "RoomDO"
 name = "ROOMS28"
 class_name = "Room28DO"
 
+[[durable_objects.bindings]]
+name = "ROOMSTP"
+class_name = "RoomTPDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomDO"]
@@ -21,6 +25,10 @@ new_sqlite_classes = ["RoomDO"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["Room28DO"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RoomTPDO"]
 
 [[kv_namespaces]]
 binding = "CODES"

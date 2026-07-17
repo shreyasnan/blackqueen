@@ -22,7 +22,7 @@ interface AppState {
   flights: Flight[];
   addFlights(fs: Omit<Flight, "id">[]): void;
   clearFlights(): void;
-  screen: "auth" | "choose" | "home" | "lobby" | "table" | "g28";
+  screen: "auth" | "choose" | "home" | "lobby" | "table" | "g28" | "gtp";
   view: ExtendedView | null;
   stateVersion: number;
   events: GameEvent[];

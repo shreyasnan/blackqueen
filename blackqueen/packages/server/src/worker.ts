@@ -4,6 +4,7 @@
 import { Env } from "./do.js";
 export { RoomDO } from "./do.js";
 export { Room28DO } from "./do28.js"; // isolated 28 room class (separate DO namespace)
+export { RoomTPDO } from "./dotp.js"; // isolated Teen Patti room class (separate DO namespace)
 
 interface WorkerEnv extends Env {
   CLERK_JWKS_URL?: string; // https://<instance>.clerk.accounts.dev/.well-known/jwks.json
@@ -12,6 +13,7 @@ interface WorkerEnv extends Env {
   GUEST_SECRET?: string; // HMAC key for guest tokens — set via `wrangler secret put GUEST_SECRET`
   ASSETS?: Fetcher;
   ROOMS28?: DurableObjectNamespace; // 28 rooms (isolated from ROOMS)
+  ROOMSTP?: DurableObjectNamespace; // Teen Patti rooms (isolated from ROOMS/ROOMS28)
 }
 
 // ---- Guest identity (PLATFORM_SPEC §1.1 amendment: hybrid — accounts OR ephemeral guests) ----
@@ -172,6 +174,17 @@ function toDO28(env: WorkerEnv, roomId: string, path: string, req: Request, id: 
   return stub.fetch(new Request(`https://do${path}`, { method: req.method, headers, body: req.body }));
 }
 
+/** Same forwarding, but to the isolated Teen Patti room namespace. */
+function toDOTP(env: WorkerEnv, roomId: string, path: string, req: Request, id: Identity, nameOverride?: string, avatar?: string): Promise<Response> {
+  const stub = env.ROOMSTP!.get(env.ROOMSTP!.idFromString(roomId));
+  const headers = new Headers(req.headers);
+  headers.set("x-account-id", id.accountId);
+  const name = (nameOverride ?? id.displayName).slice(0, 20).replace(/[\p{Cc}\p{Cf}]/gu, "") || "Player";
+  headers.set("x-display-name", encodeURIComponent(name));
+  if (avatar) headers.set("x-avatar", encodeURIComponent(avatar.slice(0, 8)));
+  return stub.fetch(new Request(`https://do${path}`, { method: req.method, headers, body: req.body }));
+}
+
 export default {
   async fetch(req: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(req.url);
@@ -228,6 +241,24 @@ export default {
         }
         const m28 = url.pathname.match(/^\/api\/28\/rooms\/([0-9a-f]+)\/(ws|state|start|addbot|removebot|leave|config)$/);
         if (m28) return toDO28(env, m28[1]!, `/${m28[2]}`, req, id);
+      }
+
+      // ---- isolated Teen Patti routes (separate DO namespace) ----
+      if (env.ROOMSTP) {
+        if (url.pathname === "/api/tp/rooms" && req.method === "POST") {
+          const body = await req.clone().json().catch(() => null) as { displayName?: string; avatar?: string } | null;
+          const roomId = env.ROOMSTP.newUniqueId().toString();
+          return toDOTP(env, roomId, "/create", req, id, body?.displayName, body?.avatar);
+        }
+        if (url.pathname === "/api/tp/rooms/join" && req.method === "POST") {
+          const body = await req.clone().json().catch(() => null) as { code?: string; displayName?: string; avatar?: string } | null;
+          const code = body?.code?.toUpperCase();
+          const roomId = code ? await env.CODES.get(`ctp:${code}`) : null;
+          if (!roomId) return new Response(JSON.stringify({ error: "invalid or expired code" }), { status: 404 });
+          return toDOTP(env, roomId, "/join", req, id, body?.displayName, body?.avatar);
+        }
+        const mtp = url.pathname.match(/^\/api\/tp\/rooms\/([0-9a-f]+)\/(ws|state|start|addbot|removebot|leave|config)$/);
+        if (mtp) return toDOTP(env, mtp[1]!, `/${mtp[2]}`, req, id);
       }
       return new Response("not found", { status: 404 });
     }

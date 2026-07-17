@@ -7,8 +7,11 @@ import { Table } from "./Table";
 import { Game28 } from "./Game28";
 import { useStore28 } from "./store28";
 import { api28, connect28 } from "./net28";
+import { GameTP } from "./GameTP";
+import { useStoreTP } from "./storetp";
+import { apiTP, connectTP } from "./nettp";
 
-export const BUILD_TAG = "ui-52-28-swipe"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-53-teenpatti"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
@@ -23,13 +26,33 @@ export function App() {
   const [pendingJoin28, setPendingJoin28] = useState<string | null>(
     () => new URLSearchParams(location.search).get("join28")?.toUpperCase() ?? null,
   );
+  const [pendingJoinTP, setPendingJoinTP] = useState<string | null>(
+    () => new URLSearchParams(location.search).get("jointp")?.toUpperCase() ?? null,
+  );
 
   useEffect(() => {
     initAuth((a) => {
       setAuthed(a);
-      if (a) setScreen(pendingJoin ? "home" : pendingJoin28 ? "g28" : "choose");
+      if (a) setScreen(pendingJoin ? "home" : pendingJoin28 ? "g28" : pendingJoinTP ? "gtp" : "choose");
     });
   }, [setScreen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Teen Patti invite link (/?jointp=CODE): auto-join the isolated TP room after auth.
+  useEffect(() => {
+    if (!authed || !pendingJoinTP) return;
+    const code = pendingJoinTP;
+    setPendingJoinTP(null);
+    history.replaceState(null, "", location.pathname);
+    setScreen("gtp");
+    const p = loadProfile(authed);
+    apiTP<{ roomId: string; members?: any[]; host?: string; reconnect?: boolean }>("/api/tp/rooms/join", { code, displayName: p.nick, avatar: p.face })
+      .then((r) => {
+        if (r.reconnect) { connectTP(r.roomId); return; }
+        useStoreTP.getState().setRoomInfo({ roomId: r.roomId, code: null, members: r.members ?? [], host: r.host ?? "" });
+        useStoreTP.getState().setScreen("lobby");
+      })
+      .catch((e) => pushToast(e instanceof Error ? e.message : "That Teen Patti invite has expired"));
+  }, [authed, pendingJoinTP, pushToast, setScreen]);
 
   // 28 invite link (/?join28=CODE): auto-join the isolated 28 room after auth.
   useEffect(() => {
@@ -68,7 +91,7 @@ export function App() {
   // reconnect-on-load: if this browser was in a live game and there's no fresh invite to act on,
   // reconnect straight to that room by id (no code needed). If the room's gone, net gives up → home.
   useEffect(() => {
-    if (!authed || pendingJoin || pendingJoin28) return;
+    if (!authed || pendingJoin || pendingJoin28 || pendingJoinTP) return;
     const rid = storedRoom();
     if (rid) connect(rid);
     // run once auth resolves; connect + ViewUpdate flips the screen to the table
@@ -77,7 +100,8 @@ export function App() {
 
   if (screen === "table") return <Table />;
   if (authed && screen === "g28") return <Game28 auth={authed} onExit={() => setScreen("choose")} />;
-  if (authed && screen === "choose") return <GamePicker name={authed.name} onPick={(g) => { if (g === "bq") setScreen("home"); else { useStore28.getState().reset(); setScreen("g28"); } }} />;
+  if (authed && screen === "gtp") return <GameTP auth={authed} onExit={() => setScreen("choose")} />;
+  if (authed && screen === "choose") return <GamePicker name={authed.name} onPick={(g) => { if (g === "bq") setScreen("home"); else if (g === "28") { useStore28.getState().reset(); setScreen("g28"); } else { useStoreTP.getState().reset(); setScreen("gtp"); } }} />;
   return (
     <div style={{ maxWidth: 440, margin: "0 auto", padding: "clamp(16px,4vw,26px)", fontFamily: SANS }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, margin: "8px 0 20px" }}>
@@ -442,7 +466,7 @@ function Lobby({ auth }: { auth: AuthState }) {
 
 // Primary = forest green (commit); secondary = neutral charcoal; both lit from above (top highlight, AO base).
 /** After auth: choose which game to play. Extensible — add a card per game. */
-function GamePicker({ name, onPick }: { name: string; onPick: (g: "bq" | "28") => void }) {
+function GamePicker({ name, onPick }: { name: string; onPick: (g: "bq" | "28" | "tp") => void }) {
   const card: React.CSSProperties = { ...surfaceCard, padding: 20, cursor: "pointer", textAlign: "left", width: "100%", display: "block" };
   return (
     <div style={{ maxWidth: 440, margin: "0 auto", padding: "clamp(16px,4vw,26px)", fontFamily: SANS }}>
@@ -460,6 +484,10 @@ function GamePicker({ name, onPick }: { name: string; onPick: (g: "bq" | "28") =
         <button style={card} onClick={() => onPick("28")}>
           <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 700, color: "var(--ink)" }}>28</div>
           <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 4 }}>Fixed partners, a concealed trump. 4 players.</div>
+        </button>
+        <button style={card} onClick={() => onPick("tp")}>
+          <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 700, color: "var(--ink)" }}>Teen Patti <span style={{ fontSize: 18 }}>🃏</span></div>
+          <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 4 }}>Blind or seen, bet your chips, last one standing. 3–6 players.</div>
         </button>
       </div>
     </div>

@@ -1258,14 +1258,15 @@ function DraggableCard({ card, interactive, variant, preselected, dimmed, focuse
 
 /* ------------------------------ cards ------------------------------ */
 // `deck` switches the point/court semantics: Black Queen (default) vs 28 (J3-92-A1-10:1, no Q♠ art).
-export function CardFace({ card, small, highlight, single, width, deck }: { card: Card; small?: boolean; highlight?: boolean; single?: boolean; width?: number; deck?: "bq" | "28" }) {
+export function CardFace({ card, small, highlight, single, width, deck }: { card: Card; small?: boolean; highlight?: boolean; single?: boolean; width?: number; deck?: "bq" | "28" | "tp" }) {
   const w = width ?? (small ? 52 : 66); // bigger baseline; everything below scales from w
   const f = w / 64; // typography scale factor
   const color = red(card.suit) ? "#b23324" : "#1c1c1a"; // real-card ink: deep red / near-black
   const is28 = deck === "28";
+  const isTP = deck === "tp"; // plain playing cards: no point dots, no Queen art
   const pv28 = (c: Card) => (c.rank === "J" ? 3 : c.rank === "9" ? 2 : c.rank === "A" || c.rank === "10" ? 1 : 0);
-  const ptVal = is28 ? pv28(card) : pv(card);
-  const queen = !is28 && isQS(card);
+  const ptVal = isTP ? 0 : is28 ? pv28(card) : pv(card);
+  const queen = !is28 && !isTP && isQS(card);
   const court = !is28 && (card.rank === "J" || card.rank === "Q" || card.rank === "K");
   const point = ptVal > 0;
   return (
