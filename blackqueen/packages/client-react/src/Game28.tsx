@@ -753,24 +753,37 @@ function Hand28({ view: v }: { view: View28 }) {
         {r.hand.map((c, i) => {
           const mid = (n - 1) / 2;
           const rot = n > 1 ? (i - mid) * Math.min(2.6, 24 / n) : 0;
+          const lift = Math.abs(i - mid) * Math.min(1.6, 12 / n);
           const actionable = conceal || (play && isLegal(c));
           const illegal = play && !isLegal(c);
+          // The fan's rotation + lift live on this STATIC wrapper; only the inner card is draggable, so
+          // the swipe gesture never fights the fan transform (that was the stiffness vs. Black Queen).
           return (
-            <motion.div key={ck(c)} drag={actionable ? "y" : false} dragSnapToOrigin dragElastic={0.5} dragConstraints={{ top: -120, bottom: 0 }}
-              whileDrag={{ scale: 1.14, zIndex: 60 }}
-              onDragStart={() => actionable && sfx.lift()}
-              onDragEnd={(_e, info) => { if (actionable && info.offset.y < -60) onCard(c); else if (actionable) sfx.ret(); }}
-              onClick={() => { if (actionable) onCard(c); }}
-              initial={{ y: 70, opacity: 0, rotate: -4 }}
-              animate={{ y: actionable ? -8 : 0, opacity: 1, rotate: rot }}
-              transition={{ delay: Math.min(i * 0.045, 0.5), type: "spring", stiffness: 320, damping: 26 }}
-              style={{ marginLeft: i === 0 ? 0 : overlap, transformOrigin: "bottom center", zIndex: i, cursor: actionable ? "pointer" : "default", touchAction: actionable ? "none" : "auto", opacity: illegal ? 0.7 : 1, filter: illegal ? "saturate(0.8) brightness(0.96)" : actionable ? "drop-shadow(0 4px 10px rgba(201,153,46,.4))" : undefined }}>
-              <CardFace card={card28(c)} width={cardW} highlight={actionable} deck="28" single />
-            </motion.div>
+            <div key={ck(c)} style={{ marginLeft: i === 0 ? 0 : overlap, transform: `rotate(${rot}deg) translateY(${lift}px)`, transformOrigin: "bottom center", zIndex: i, flexShrink: 0 }}>
+              <DraggableCard28 card={c} width={cardW} actionable={actionable} illegal={!!illegal} delay={Math.min(i * 0.045, 0.5)} onPlay={() => onCard(c)} />
+            </div>
           );
         })}
       </div>
     </div>
+  );
+}
+
+/** A single draggable/tappable card — drag physics ported 1:1 from Black Queen's DraggableCard:
+ *  free-axis drag, snap back to origin, no constraints, so the swipe feels light and elastic. */
+function DraggableCard28({ card, width, actionable, illegal, delay, onPlay }: { card: Card28; width: number; actionable: boolean; illegal: boolean; delay: number; onPlay: () => void }) {
+  return (
+    <motion.div drag={actionable} dragSnapToOrigin dragElastic={0.6}
+      whileDrag={{ scale: 1.15, rotate: 4, zIndex: 60 }}
+      onDragStart={() => actionable && sfx.lift()}
+      onDragEnd={(_e, info) => { if (!actionable) return; if (info.offset.y < -80) onPlay(); else sfx.ret(); }}
+      onClick={() => { if (actionable) onPlay(); }}
+      initial={{ y: 60, opacity: 0 }}
+      animate={{ y: actionable ? -10 : 0, opacity: 1 }}
+      transition={{ delay, type: "spring", stiffness: 320, damping: 26 }}
+      style={{ cursor: actionable ? "pointer" : "default", touchAction: actionable ? "none" : "auto", opacity: illegal ? 0.7 : 1, filter: illegal ? "saturate(0.8) brightness(0.96)" : actionable ? "drop-shadow(0 4px 10px rgba(201,153,46,.4))" : undefined }}>
+      <CardFace card={card28(card)} width={width} highlight={actionable} deck="28" single />
+    </motion.div>
   );
 }
 
