@@ -41,6 +41,7 @@ let paceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastEnq = 0;
 function clearPacing(): void { if (paceTimer) { clearTimeout(paceTimer); paceTimer = null; } viewQueue = []; lastEnq = 0; }
 function enqueueView(view: any, sv: number): void {
+  if (!roomId) return; // left the table — ignore any straggler frame so it can't resurrect the game-over screen
   if (sv <= lastEnq) return;
   lastEnq = sv;
   viewQueue.push({ view, sv });
@@ -48,6 +49,7 @@ function enqueueView(view: any, sv: number): void {
 }
 function applyNextView(): void {
   paceTimer = null;
+  if (!roomId) { viewQueue = []; return; } // left mid-pace — drop the rest
   const item = viewQueue.shift();
   if (!item) return;
   stateVersion = item.sv;
@@ -79,6 +81,7 @@ export async function connect28(rid: string): Promise<void> {
   useStore28.getState().setConnection("connecting");
   ws.onopen = () => { useStore28.getState().setConnection("connected"); tries = 0; };
   ws.onmessage = (e) => {
+    if (!roomId) return; // already left — ignore
     const m = JSON.parse(e.data);
     if (m.t === "ViewUpdate") enqueueView(m.view, m.stateVersion);
   };

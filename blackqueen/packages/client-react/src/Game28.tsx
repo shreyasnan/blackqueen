@@ -76,7 +76,7 @@ export function Game28({ auth, onExit }: { auth: AuthState; onExit: () => void }
     const rid = storedRoom28();
     if (rid) connect28(rid);
   }, []);
-  if (screen === "table") return <Table28 />;
+  if (screen === "table") return <Table28 onExit={onExit} />;
   if (screen === "lobby") return <Lobby28 auth={auth} />;
   return <Home28 auth={auth} onExit={onExit} />;
 }
@@ -352,7 +352,7 @@ function useTheater28(
 }
 
 /* ------------------------------ Table ------------------------------ */
-function Table28() {
+function Table28({ onExit }: { onExit: () => void }) {
   const view = useStore28((s) => s.view);
   const stateVersion = useStore28((s) => s.stateVersion);
   const connection = useStore28((s) => s.connection);
@@ -365,7 +365,7 @@ function Table28() {
   useTheater28(view, stateVersion, setOverlay, setBubbles, () => setBurst((b) => b + 1));
 
   if (!view) return <div style={{ display: "grid", placeItems: "center", height: "100dvh", color: "var(--ivory)", background: "#14150f" }}>Connecting…</div>;
-  if (view.phase === "ENDED") return <MatchEnd view={view} />;
+  if (view.phase === "ENDED") return <MatchEnd view={view} onExit={onExit} />;
 
   return (
     <div style={{ height: "100dvh", position: "relative", overflow: "hidden", background: "radial-gradient(135% 95% at 50% 4%, #23241c 0%, #16170f 58%, #0c0d08 100%)", display: "flex", flexDirection: "column", fontFamily: SANS }}>
@@ -949,10 +949,11 @@ function Toasts28({ toasts }: { toasts: { id: number; text: string }[] }) {
   );
 }
 
-function MatchEnd({ view }: { view: View28 }) {
+function MatchEnd({ view, onExit }: { view: View28; onExit: () => void }) {
   const winner = view.teamScores[0] === view.teamScores[1] ? -1 : view.teamScores[0] > view.teamScores[1] ? 0 : 1;
   const myTeam = teamOf(view.mySeat ?? 0);
   useEffect(() => { sfx.fanfare(); }, []);
+  const leave = () => { disconnect28(); useStore28.getState().reset(); onExit(); };
   return (
     <div style={{ height: "100dvh", display: "grid", placeItems: "center", background: "radial-gradient(135% 95% at 50% 4%, #23241c, #0c0d08)", color: "var(--ivory)", fontFamily: SANS, textAlign: "center" }}>
       <div>
@@ -963,7 +964,7 @@ function MatchEnd({ view }: { view: View28 }) {
         <div style={{ fontSize: 20, fontWeight: 800, color: winner < 0 ? "var(--ivory)" : winner === myTeam ? "var(--gold)" : "var(--teal)", marginBottom: 18 }}>
           {winner < 0 ? "Tied match" : winner === myTeam ? "Your team wins!" : "Your team lost"}
         </div>
-        <button style={{ ...btn, padding: "12px 26px", fontSize: 16 }} onClick={() => { disconnect28(); useStore28.getState().reset(); }}>Back to games ▸</button>
+        <button style={{ ...btn, padding: "12px 26px", fontSize: 16 }} onClick={leave}>Back to games ▸</button>
       </div>
     </div>
   );
