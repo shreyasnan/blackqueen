@@ -168,7 +168,7 @@ export class RoomCore28 {
 
     if (action.type === "HOST_NEXT_DEAL") { if (accountId === this.hostAccountId) this.advanceDeal(); return; }
     if (action.type === "HOST_END_GAME") { if (accountId === this.hostAccountId) { this.phase = "ENDED"; this.endedAt = Date.now(); this.pushViews(); } return; }
-    if (action.type === "EMOTE") { this.lastEvents = [{ kind: "EMOTE", seat: this.seatOf.get(accountId) ?? -1, emote: action.payload.emote }]; this.pushViews(); return; }
+    if (action.type === "EMOTE") { this.lastEvents = [{ kind: "EMOTE", seat: this.seatOf.get(accountId) ?? -1, emote: action.payload.emote }]; this.stateVersion++; this.pushViews(); return; } // bump so the client's version-dedupe delivers the reaction frame
 
     const seat = this.seatOf.get(accountId);
     if (seat === undefined || !this.game) return;

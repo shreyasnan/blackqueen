@@ -34,6 +34,14 @@ export interface View28 {
 
 export type RoomInfo28 = { roomId: string; code: string | null; members: { accountId: string; displayName: string; avatar?: string; isBot?: boolean }[]; host: string; N?: number };
 
+// Card-flight animation (dealing, trick-gather) — mirrors Black Queen's flight layer.
+export interface Flight28 {
+  id: number;
+  x0: number; y0: number; x1: number; y1: number;
+  card?: Card28; // undefined = face-down card back
+  delay: number;
+}
+
 interface Store28 {
   screen: "home" | "lobby" | "table";
   view: View28 | null;
@@ -41,16 +49,21 @@ interface Store28 {
   connection: "idle" | "connecting" | "connected" | "reconnecting";
   roomInfo: RoomInfo28 | null;
   toasts: { id: number; text: string }[];
+  flights: Flight28[];
+  lastTrickOpen: boolean;
   setScreen(s: Store28["screen"]): void;
   setView(v: View28, version: number): void;
   setConnection(c: Store28["connection"]): void;
   setRoomInfo(r: RoomInfo28 | null): void;
   pushToast(text: string): void;
   dropToast(id: number): void;
+  addFlights(fs: Omit<Flight28, "id">[]): void;
+  setLastTrickOpen(open: boolean): void;
   reset(): void;
 }
 
 let tid = 0;
+let fid = 0;
 export const useStore28 = create<Store28>((set) => ({
   screen: "home",
   view: null,
@@ -58,11 +71,20 @@ export const useStore28 = create<Store28>((set) => ({
   connection: "idle",
   roomInfo: null,
   toasts: [],
+  flights: [],
+  lastTrickOpen: false,
   setScreen: (screen) => set({ screen }),
   setView: (view, stateVersion) => set({ view, stateVersion, screen: "table" }),
   setConnection: (connection) => set({ connection }),
   setRoomInfo: (roomInfo) => set({ roomInfo }),
   pushToast: (text) => { const id = ++tid; set((s) => ({ toasts: [...s.toasts, { id, text }] })); setTimeout(() => useStore28.getState().dropToast(id), 2600); },
   dropToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
-  reset: () => set({ screen: "home", view: null, stateVersion: 0, connection: "idle", roomInfo: null }),
+  addFlights: (fs) => {
+    const withIds = fs.map((f) => ({ ...f, id: ++fid }));
+    set((s) => ({ flights: [...s.flights, ...withIds] }));
+    const maxDelay = Math.max(...fs.map((f) => f.delay), 0);
+    setTimeout(() => set((s) => ({ flights: s.flights.filter((f) => !withIds.some((w) => w.id === f.id)) })), maxDelay + 900);
+  },
+  setLastTrickOpen: (lastTrickOpen) => set({ lastTrickOpen }),
+  reset: () => set({ screen: "home", view: null, stateVersion: 0, connection: "idle", roomInfo: null, flights: [], lastTrickOpen: false }),
 }));
