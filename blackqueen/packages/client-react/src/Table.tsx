@@ -9,6 +9,7 @@ import { legalPlays } from "@engine/tricks"; // the ONE permitted engine functio
 import type { Card, Suit } from "@engine/cards";
 import { btn, btnSec, inp } from "./App";
 import { sfx, haptic, isMuted, toggleMute } from "./audio";
+import { useCardScale, toggleLargeCards, isLargeCards } from "./prefs";
 import { Face } from "./faces";
 
 const GLYPH: Record<string, string> = { C: "♣", D: "♦", H: "♥", S: "♠" };
@@ -555,6 +556,9 @@ function HUD({ view: v, onMute, onLeaderboard }: { view: ExtendedView; onMute: (
         <button aria-label="leaderboard" title="Leaderboard — everyone's score" onClick={onLeaderboard}
           style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, whiteSpace: "nowrap", flexShrink: 0 }}>
           {wide ? "🏆 scores" : "🏆"}
+        </button>
+        <button aria-label="large cards" title="Bigger cards" style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, flexShrink: 0, fontWeight: 800, background: isLargeCards() ? "var(--gold)" : undefined, color: isLargeCards() ? "#1c1c1a" : undefined }} onClick={() => { toggleLargeCards(); onMute(); }}>
+          🅐
         </button>
         <button aria-label="mute" style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, flexShrink: 0 }} onClick={() => { toggleMute(); onMute(); }}>
           {isMuted() ? "🔇" : "🔊"}
@@ -1162,14 +1166,15 @@ function Hand({ view: v }: { view: ExtendedView }) {
   }, [myTurn, focus, hand, legal, n]);
 
   const wide = useWide();
+  const scale = useCardScale();
   // Bigger cards, responsive: generous on desktop, still 13-cards-wide safe on a 380px phone.
-  const cardW = wide ? 78 : Math.min(68, Math.max(56, Math.floor((typeof innerWidth !== "undefined" ? innerWidth : 400) / (n * 0.62 + 1))));
+  const cardW = Math.round((wide ? 78 : Math.min(68, Math.max(56, Math.floor((typeof innerWidth !== "undefined" ? innerWidth : 400) / (n * 0.62 + 1))))) * scale);
   const overlap = -Math.round(cardW * 0.37);
   // v2.2 mobile fix: with 12+ cards (2-deck hands) the centered fan clips its left edge off-screen.
   // When the fan is wider than the viewport, left-align it and let it scroll horizontally.
   const fanWidth = cardW + (n - 1) * (cardW + overlap);
   const vw = typeof innerWidth !== "undefined" ? innerWidth : 400;
-  const overflows = !wide && fanWidth > vw - 16;
+  const overflows = fanWidth > vw - 16;
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
       {overflows && (

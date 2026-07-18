@@ -9,6 +9,7 @@ import { btn, btnSec } from "./App";
 import { CardFace } from "./Table";
 import { Face } from "./faces";
 import { sfx, haptic, isMuted, toggleMute } from "./audio";
+import { useCardScale, toggleLargeCards, isLargeCards } from "./prefs";
 import type { AuthState } from "./net";
 
 const cardTP = (c: CardTP) => c as unknown as Parameters<typeof CardFace>[0]["card"];
@@ -60,17 +61,42 @@ export function GameTP({ auth, onExit }: { auth: AuthState; onExit: () => void }
 }
 
 /* ------------------------------ Home ------------------------------ */
+function PillGroup({ label, value, options, onChange, fmt }: { label: string; value: number; options: number[]; onChange: (v: number) => void; fmt?: (v: number) => string }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", color: "var(--ink-soft)", marginBottom: 6 }}>{label}</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {options.map((o) => (
+          <button key={o} onClick={() => onChange(o)}
+            style={{ flex: "1 0 auto", minWidth: 56, padding: "9px 10px", borderRadius: 11, fontSize: 14, fontWeight: 700, cursor: "pointer",
+              border: o === value ? "2px solid var(--gold)" : "1px solid rgba(70,52,26,.18)",
+              background: o === value ? "rgba(201,153,46,.14)" : "var(--card)", color: "var(--ink)" }}>
+            {fmt ? fmt(o) : o.toLocaleString()}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function HomeTP({ auth, onExit }: { auth: AuthState; onExit: () => void }) {
   const setScreen = useStoreTP((s) => s.setScreen);
   const setRoomInfo = useStoreTP((s) => s.setRoomInfo);
   const pushToast = useStoreTP((s) => s.pushToast);
   const [code, setCode] = useState("");
+  const [chipsN, setChipsN] = useState(1000);
+  const [boot, setBoot] = useState(10);
+  const [capMult, setCapMult] = useState(0); // 0 = no limit (default 128×), else multiple of boot
   const nick = (localStorage.getItem("bq_nick") || auth.name).slice(0, 20);
   const avatar = localStorage.getItem("bq_face") || "classic";
+  // keep the boot sensible relative to the stack
+  const bootOptions = [1, 2, 5, 10, 25, 50].filter((b) => b <= chipsN / 5);
+  useEffect(() => { if (!bootOptions.includes(boot)) setBoot(bootOptions[Math.min(3, bootOptions.length - 1)]!); }, [chipsN]); // eslint-disable-line react-hooks/exhaustive-deps
   const create = async () => {
     try {
-      const r = await apiTP<{ roomId: string; code: string }>("/api/tp/rooms", { displayName: nick, avatar });
-      setRoomInfo({ roomId: r.roomId, code: r.code, members: [{ accountId: auth.accountId, displayName: nick, avatar }], host: auth.accountId });
+      const cap = capMult > 0 ? capMult * boot : undefined;
+      const r = await apiTP<{ roomId: string; code: string }>("/api/tp/rooms", { displayName: nick, avatar, chips: chipsN, boot, cap });
+      setRoomInfo({ roomId: r.roomId, code: r.code, members: [{ accountId: auth.accountId, displayName: nick, avatar }], host: auth.accountId, chips: chipsN, boot, cap: cap ?? boot * 128 });
       setScreen("lobby");
     } catch (e) { pushToast(String(e)); }
   };
@@ -86,9 +112,18 @@ function HomeTP({ auth, onExit }: { auth: AuthState; onExit: () => void }) {
     <div style={{ fontFamily: SANS, maxWidth: 440, margin: "0 auto", padding: "clamp(16px,4vw,26px)" }}>
       <button onClick={onExit} style={{ background: "transparent", border: 0, color: "var(--ink-soft)", cursor: "pointer", fontSize: 13.5, marginBottom: 8 }}>← Games</button>
       <h1 style={{ fontFamily: SERIF, fontSize: "clamp(25px,7vw,31px)", fontWeight: 700, color: "var(--ink)", margin: "8px 0 4px" }}>Teen Patti</h1>
-      <p style={{ color: "var(--ink-soft)", marginBottom: 20, fontSize: 14.5 }}>Blind or seen, bet your chips, last one standing wins.</p>
+      <p style={{ color: "var(--ink-soft)", marginBottom: 18, fontSize: 14.5 }}>Blind or seen, bet your chips, last one standing wins.</p>
+      <div style={{ background: "var(--card)", border: "1px solid rgba(70,52,26,.12)", borderRadius: 16, padding: "14px 16px", marginBottom: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 12 }}>Table settings</div>
+        <PillGroup label="Starting chips" value={chipsN} options={[500, 1000, 5000, 10000]} onChange={setChipsN} />
+        <PillGroup label="Min bet (boot / blind)" value={boot} options={bootOptions} onChange={setBoot} />
+        <PillGroup label="Max bet" value={capMult} options={[0, 20, 50, 100]} onChange={setCapMult} fmt={(m) => (m === 0 ? "No limit" : `${(m * boot).toLocaleString()}`)} />
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.45 }}>
+          Blind players bet <b>{boot.toLocaleString()}</b>; seen players (chaal) bet <b>{(boot * 2).toLocaleString()}</b>. {capMult > 0 ? `Raises cap at ${(capMult * boot).toLocaleString()}.` : "Raises are effectively uncapped."}
+        </div>
+      </div>
       <button style={{ width: "100%", ...btn, borderRadius: 15, padding: 15, fontSize: 16 }} onClick={create}>Create table</button>
-      <div style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", marginTop: 10 }}>3–6 players — fill empty seats with bots. Everyone starts with 1,000 chips.</div>
+      <div style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", marginTop: 10 }}>3–6 players — fill empty seats with bots. Last one holding chips wins.</div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "22px 0 16px", color: "var(--ink-soft)", fontSize: 12.5 }}>
         <div style={{ flex: 1, height: 1, background: "rgba(70,52,26,.14)" }} />or join a table<div style={{ flex: 1, height: 1, background: "rgba(70,52,26,.14)" }} />
       </div>
@@ -114,7 +149,7 @@ function LobbyTP({ auth }: { auth: AuthState }) {
       try {
         const s = await apiTP<any>(`/api/tp/rooms/${roomInfo.roomId}/state`);
         if (s.phase !== "OPEN") { clearInterval(t); connectTP(roomInfo.roomId); return; }
-        setRoomInfo({ ...roomInfo, members: s.members, host: s.host, code: s.code });
+        setRoomInfo({ ...roomInfo, members: s.members, host: s.host, code: s.code, chips: s.chips, boot: s.boot, cap: s.cap });
       } catch { /* transient */ }
     }, 2000);
     return () => clearInterval(t);
@@ -142,6 +177,13 @@ function LobbyTP({ auth }: { auth: AuthState }) {
           <div style={{ fontSize: 11, letterSpacing: 1.4, textTransform: "uppercase", color: "var(--ink-soft)" }}>Invite code</div>
           <div style={{ fontFamily: SERIF, fontSize: "clamp(30px,10vw,40px)", letterSpacing: 8, marginTop: 6, color: "var(--ink)" }}>{roomInfo.code}</div>
           <button onClick={shareLink} style={{ ...btnSec, marginTop: 14, borderRadius: 14, padding: "12px 18px" }}>Share invite link</button>
+        </div>
+      )}
+      {roomInfo.chips != null && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "4px 0 12px" }}>
+          <span style={{ fontSize: 12, background: "var(--card)", border: "1px solid rgba(70,52,26,.14)", borderRadius: 20, padding: "5px 12px", color: "var(--ink)" }}>🪙 {roomInfo.chips.toLocaleString()} start</span>
+          <span style={{ fontSize: 12, background: "var(--card)", border: "1px solid rgba(70,52,26,.14)", borderRadius: 20, padding: "5px 12px", color: "var(--ink)" }}>boot {roomInfo.boot?.toLocaleString()}</span>
+          <span style={{ fontSize: 12, background: "var(--card)", border: "1px solid rgba(70,52,26,.14)", borderRadius: 20, padding: "5px 12px", color: "var(--ink)" }}>max {roomInfo.cap && roomInfo.boot && roomInfo.cap < roomInfo.boot * 128 ? roomInfo.cap.toLocaleString() : "no limit"}</span>
         </div>
       )}
       <div style={{ fontSize: 13, color: "var(--ink-soft)", margin: "6px 4px 12px" }}>{members.length} of 6 seated · need 3 to start</div>
@@ -335,6 +377,7 @@ function HUDTP({ view: v, onMute }: { view: ViewTP; onMute: () => void }) {
         {r && <span style={{ fontSize: 12.5, color: "rgba(242,234,214,.7)" }}>stake <b style={{ color: "var(--gold)" }}>{chips(r.stake)}</b></span>}
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
+        <button aria-label="large cards" title="Bigger cards" onClick={() => { toggleLargeCards(); onMute(); }} style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, fontWeight: 800, background: isLargeCards() ? "var(--gold)" : undefined, color: isLargeCards() ? "#1c1c1a" : undefined }}>🅐</button>
         <button aria-label="mute" onClick={() => { toggleMute(); onMute(); }} style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8 }}>{isMuted() ? "🔇" : "🔊"}</button>
       </div>
     </div>
@@ -484,8 +527,9 @@ function MyAreaTP({ view: v, hideControls }: { view: ViewTP; hideControls?: bool
 function HandTP({ view: v }: { view: ViewTP }) {
   const r = v.round!;
   const wide = useWide();
+  const scale = useCardScale();
   const cards = r.yourCards;
-  const w = wide ? 74 : 62;
+  const w = Math.round((wide ? 78 : 66) * scale);
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -548,6 +592,8 @@ function CardBackTP({ width }: { width: number }) {
 /* ------------------------------ set pieces ------------------------------ */
 function SetPieceTP({ overlay, view: v, onDismiss }: { overlay: OverlayTP; view: ViewTP; onDismiss: () => void }) {
   const persistent = overlay?.type === "round";
+  const scale = useCardScale();
+  const revealW = Math.round(52 * scale);
   const me = v.mySeat ?? 0;
   const isHost = v.hostSeat === me;
   const name = (s: number) => (s === me ? "You" : v.seatNames[s]?.split(" ")[0] ?? "Bot");
@@ -572,7 +618,7 @@ function SetPieceTP({ overlay, view: v, onDismiss }: { overlay: OverlayTP; view:
                       return (
                         <div key={rv.seat} style={{ textAlign: "center" }}>
                           <div style={{ display: "flex", gap: 3, justifyContent: "center", borderRadius: 9, padding: 3, boxShadow: win ? "0 0 0 3px var(--gold)" : undefined }}>
-                            {rv.cards.map((c) => <CardFace key={ck(c)} card={cardTP(c)} small deck="tp" single />)}
+                            {rv.cards.map((c) => <CardFace key={ck(c)} card={cardTP(c)} width={revealW} deck="tp" single />)}
                           </div>
                           <div style={{ fontSize: 12, marginTop: 4, fontWeight: 700, color: win ? "var(--gold)" : "var(--ink)" }}>{name(rv.seat)} · {rv.hand}{win ? " ✓" : ""}</div>
                         </div>

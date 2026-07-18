@@ -51,7 +51,7 @@ export class RoomTPDO implements DurableObject {
 
     switch (url.pathname) {
       case "/create": {
-        const cfg = await req.json().catch(() => ({})) as { chips?: number; boot?: number };
+        const cfg = await req.json().catch(() => ({})) as { chips?: number; boot?: number; cap?: number };
         this.core.create(accountId, displayName, avatar, cfg);
         await this.env.CODES.put(`ctp:${this.core.inviteCode}`, this.ctx.id.toString(), { expirationTtl: 24 * 3600 });
         await this.ctx.storage.setAlarm(Date.now() + LOBBY_TTL_MS);
@@ -89,6 +89,7 @@ export class RoomTPDO implements DurableObject {
           phase: this.core.phase, members: this.core.members, host: this.core.hostAccountId,
           code: this.core.phase === "OPEN" ? this.core.inviteCode : null,
           mySeat: this.core.seatOf.get(accountId) ?? null,
+          chips: this.core.startingChips, boot: this.core.boot, cap: this.core.maxStake,
         });
       case "/ws": {
         if (req.headers.get("Upgrade") !== "websocket") return new Response("expected websocket", { status: 426 });

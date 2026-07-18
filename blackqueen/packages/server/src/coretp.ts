@@ -20,6 +20,7 @@ export class RoomCoreTP {
   inviteCode = "";
   startingChips = 1000;
   boot = 10;
+  maxStake = 1280;       // raise cap (a blind-equivalent ceiling); keeps escalation bounded
   turnTimerMs = 30000;
   graceMs = 15000;
   seatOf = new Map<string, number>();
@@ -39,12 +40,14 @@ export class RoomCoreTP {
   constructor(public roomId: string, private out: Outbound) {}
 
   // ---------- lobby ----------
-  create(hostAccountId: string, hostName: string, avatar?: string, opts?: { chips?: number; boot?: number }): void {
+  create(hostAccountId: string, hostName: string, avatar?: string, opts?: { chips?: number; boot?: number; cap?: number }): void {
     this.hostAccountId = hostAccountId;
     this.members = [{ accountId: hostAccountId, displayName: hostName, avatar: sanitizeAvatar(avatar), connected: true }];
     this.inviteCode = this.newCode();
-    if (opts?.chips && opts.chips >= 100 && opts.chips <= 100000) this.startingChips = opts.chips;
-    if (opts?.boot && opts.boot >= 1 && opts.boot <= this.startingChips / 10) this.boot = opts.boot;
+    if (opts?.chips && opts.chips >= 100 && opts.chips <= 1000000) this.startingChips = Math.round(opts.chips);
+    if (opts?.boot && opts.boot >= 1 && opts.boot <= this.startingChips / 5) this.boot = Math.round(opts.boot);
+    // cap = max blind-equivalent stake (0 / omitted → generous default of 128× the boot)
+    this.maxStake = opts?.cap && opts.cap >= this.boot * 2 ? Math.min(Math.round(opts.cap), this.startingChips) : this.boot * 128;
   }
   private newCode(): string {
     const b = this.out.randomBytes(6);
@@ -109,7 +112,7 @@ export class RoomCoreTP {
   private newHand(): void {
     const withChips = this.stacks.filter((c) => c > 0).length;
     if (withChips <= 1) { this.phase = "ENDED"; this.winnerSeat = this.stacks.findIndex((c) => c > 0); this.endedAt = Date.now(); this.stateVersion++; return; }
-    this.game = initRound(this.dealer, this.seed(), this.stacks.slice(), this.boot);
+    this.game = initRound(this.dealer, this.seed(), this.stacks.slice(), this.boot, this.maxStake);
     this.stateVersion++;
   }
 
@@ -237,7 +240,7 @@ export class RoomCoreTP {
   serialize(): unknown {
     return {
       phase: this.phase, members: this.members, hostAccountId: this.hostAccountId, inviteCode: this.inviteCode,
-      startingChips: this.startingChips, boot: this.boot, seatOf: [...this.seatOf], accountOfSeat: this.accountOfSeat,
+      startingChips: this.startingChips, boot: this.boot, maxStake: this.maxStake, seatOf: [...this.seatOf], accountOfSeat: this.accountOfSeat,
       seatNames: this.seatNames, seatAvatars: this.seatAvatars, stacks: this.stacks, game: this.game,
       handNumber: this.handNumber, dealer: this.dealer, winnerSeat: this.winnerSeat, stateVersion: this.stateVersion, endedAt: this.endedAt,
     };

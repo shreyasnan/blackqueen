@@ -9,6 +9,7 @@ import { btn, btnSec } from "./App";
 import { CardFace } from "./Table";
 import { Face } from "./faces";
 import { sfx, haptic, isMuted, toggleMute } from "./audio";
+import { useCardScale, toggleLargeCards, isLargeCards } from "./prefs";
 import type { AuthState } from "./net";
 
 const card28 = (c: Card28) => c as unknown as Parameters<typeof CardFace>[0]["card"]; // 28 ranks are valid BQ ranks
@@ -417,6 +418,7 @@ function HUD28({ view: v, onMute, onScores }: { view: View28; onMute: () => void
           </div>
         )}
         <button aria-label="scores" title="Scores" onClick={onScores} style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8 }}>{wide ? "🏆 scores" : "🏆"}</button>
+        <button aria-label="large cards" title="Bigger cards" onClick={() => { toggleLargeCards(); onMute(); }} style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8, fontWeight: 800, background: isLargeCards() ? "var(--gold)" : undefined, color: isLargeCards() ? "#1c1c1a" : undefined }}>🅐</button>
         <button aria-label="mute" onClick={() => { toggleMute(); onMute(); }} style={{ ...btnSec, padding: "4px 9px", fontSize: 13, borderRadius: 8 }}>{isMuted() ? "🔇" : "🔊"}</button>
       </div>
     </div>
@@ -733,6 +735,7 @@ function Hand28({ view: v }: { view: View28 }) {
   const r = v.round;
   const me = v.mySeat ?? 0;
   const wide = useWide();
+  const scale = useCardScale();
   if (!r) return null;
   const mine = r.actor === me;
   const conceal = mine && r.phase === "CONCEAL";
@@ -743,13 +746,17 @@ function Hand28({ view: v }: { view: View28 }) {
     else if (play && isLegal(c)) { sendAction28("PLAY", { card: c }); sfx.thock(); haptic(10); }
   };
   const n = r.hand.length;
-  const cardW = wide ? 74 : Math.min(66, Math.max(50, Math.floor((typeof innerWidth !== "undefined" ? innerWidth : 400) / (n * 0.66 + 1))));
+  const base = wide ? 74 : Math.min(66, Math.max(50, Math.floor((typeof innerWidth !== "undefined" ? innerWidth : 400) / (n * 0.66 + 1))));
+  const cardW = Math.round(base * scale);
   const overlap = -Math.round(cardW * 0.34);
+  const fanWidth = cardW + (n - 1) * (cardW + overlap);
+  const vw = typeof innerWidth !== "undefined" ? innerWidth : 400;
+  const overflows = fanWidth > vw - 16;
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
       {conceal && <div style={{ textAlign: "center", color: "var(--gold)", fontSize: 12.5, marginBottom: 6 }}>Tap or swipe up a card to set it face-down as trump — its suit becomes trump.</div>}
       {play && <div style={{ textAlign: "center", color: "rgba(242,234,214,.7)", fontSize: 11.5, marginBottom: 4 }}>tap or swipe a card up to play</div>}
-      <div style={{ position: "relative", display: "flex", justifyContent: "center", alignItems: "flex-end", padding: "2px 0", minHeight: cardW * 1.42 + 16, width: "100%" }}>
+      <div style={{ position: "relative", display: "flex", justifyContent: overflows ? "flex-start" : "center", alignItems: "flex-end", padding: overflows ? "2px 8px" : "2px 0", minHeight: cardW * 1.42 + 16, width: "100%", overflowX: overflows ? "auto" : "visible", WebkitOverflowScrolling: "touch" as any }}>
         {r.hand.map((c, i) => {
           const mid = (n - 1) / 2;
           const rot = n > 1 ? (i - mid) * Math.min(2.6, 24 / n) : 0;

@@ -36,7 +36,7 @@ export interface ViewTP {
   events: { kind: string; [k: string]: unknown }[];
 }
 
-export type RoomInfoTP = { roomId: string; code: string | null; members: { accountId: string; displayName: string; avatar?: string; isBot?: boolean }[]; host: string };
+export type RoomInfoTP = { roomId: string; code: string | null; members: { accountId: string; displayName: string; avatar?: string; isBot?: boolean }[]; host: string; chips?: number; boot?: number; cap?: number };
 
 export interface FlightTP { id: number; x0: number; y0: number; x1: number; y1: number; card?: CardTP; delay: number }
 
