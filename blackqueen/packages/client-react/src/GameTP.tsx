@@ -420,6 +420,9 @@ function SeatTP({ view: v, seat, bubbles }: { view: ViewTP; seat: number; bubble
   const away = seat !== me && v.seatConnected[seat] === false;
   const isDealer = r?.dealer === seat;
   const out = v.stacks[seat] === 0 && (!p || !p.active);
+  // Show chips that visibly decrease as bets go in: available = start-of-hand stack − committed bet
+  // during a live hand; once the hand is DONE the room has already paid out, so use the settled stack.
+  const avail = p && p.active && r && r.phase !== "DONE" ? p.stack - p.bet : v.stacks[seat] ?? 0;
   return (
     <motion.div ref={(el) => { if (el) seatEls.set(seat, el); }} animate={{ scale: active ? 1.08 : 1, y: active ? -2 : 0, opacity: packed ? 0.55 : 1 }} transition={SPRING}
       style={{ position: "relative", display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 4, textAlign: "center", maxWidth: wide ? undefined : "40vw" }}>
@@ -445,8 +448,8 @@ function SeatTP({ view: v, seat, bubbles }: { view: ViewTP; seat: number; bubble
       </div>
       <div style={{ background: "rgba(16,32,24,.62)", borderRadius: 10, padding: seat === me ? "3px 11px" : "2px 8px", maxWidth: wide ? 150 : "38vw", boxShadow: "0 2px 6px rgba(0,0,0,.28)" }}>
         <div style={{ fontWeight: 700, fontSize: seat === me ? 13 : 12, color: "#f2ead6", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 }}>{name}{out ? " · out" : ""}</div>
-        <div style={{ fontSize: 10.5, color: "var(--gold)", whiteSpace: "nowrap", lineHeight: 1.25, fontWeight: 700 }}>{away ? <b style={{ color: "#ff9b8a" }}>💤 away</b> : `🪙 ${chips(v.stacks[seat] ?? 0)}`}</div>
-        {p && p.active && !packed && p.bet > 0 && <div style={{ fontSize: 9.5, color: "rgba(255,253,247,.75)" }}>bet {chips(p.bet)}</div>}
+        <div style={{ fontSize: 10.5, color: "var(--gold)", whiteSpace: "nowrap", lineHeight: 1.25, fontWeight: 700 }}>{away ? <b style={{ color: "#ff9b8a" }}>💤 away</b> : `🪙 ${chips(avail)}`}</div>
+        {p && p.active && !packed && p.bet > 0 && r?.phase !== "DONE" && <div style={{ fontSize: 9.5, color: "rgba(255,253,247,.75)" }}>in pot {chips(p.bet)}</div>}
         {packed && p?.active && <div style={{ fontSize: 9.5, color: "#ff9b8a", fontWeight: 700 }}>packed</div>}
       </div>
     </motion.div>

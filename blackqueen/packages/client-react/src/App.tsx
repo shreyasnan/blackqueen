@@ -11,7 +11,7 @@ import { GameTP } from "./GameTP";
 import { useStoreTP } from "./storetp";
 import { apiTP, connectTP } from "./nettp";
 
-export const BUILD_TAG = "ui-53-teenpatti"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
+export const BUILD_TAG = "ui-54-tp-livechips"; // bump on every UI iteration — visible on Home, so builds are never ambiguous
 
 export function App() {
   const screen = useStore((s) => s.screen);
